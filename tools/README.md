@@ -22,7 +22,7 @@ Bridges the *remote* posture signal (the `Last verified:` field on the Notion Se
 
 # Fetch the actual timestamp from Notion (requires read-scoped integration token)
 export NOTION_TOKEN="secret_..."
-export SWANLAKE_POSTURE_PAGE_ID="34c018ae-d8f8-81ce-8bd1-fbf80defc1e6"
+export SWANLAKE_POSTURE_PAGE_ID="00000000-0000-0000-0000-000000000000"  # <- replace with your real posture page id
 ./tools/sync-posture.py pull
 # → synced: 2026-04-24T10:15:33Z
 
@@ -39,7 +39,7 @@ export SWANLAKE_POSTURE_PAGE_ID="34c018ae-d8f8-81ce-8bd1-fbf80defc1e6"
 | Variable | Default | Used by | Effect |
 |---|---|---|---|
 | `SWANLAKE_LAST_RUN` | `~/.claude/.last-watchdog-run` | all | Path to the ISO-UTC timestamp file. Shared with `status-segment.py`. |
-| `SWANLAKE_POSTURE_PAGE_ID` | placeholder UUID | `pull` | Notion page id of the Security Posture page. **Override this** — the shipped default is a placeholder, not a real page. |
+| `SWANLAKE_POSTURE_PAGE_ID` | `00000000-0000-0000-0000-000000000000` | `pull` | Notion page id of the Security Posture page. **You must override this** — the shipped default is an obvious all-zeros placeholder and mode `pull` will 404 until you set it to your real page id. |
 | `NOTION_TOKEN` | (unset) | `pull` | Bearer token for a Notion integration with read access to the posture page. **Required** for `pull`. |
 | `SWANLAKE_STALE_YELLOW` | `2` | `check` | Days triggering the yellow band. |
 | `SWANLAKE_STALE_RED` | `7` | `check` | Days triggering the red band. |
@@ -66,7 +66,7 @@ export SWANLAKE_POSTURE_PAGE_ID="34c018ae-d8f8-81ce-8bd1-fbf80defc1e6"
 #### Weekly cron (Monday 09:00 local, pull mode)
 
 ```cron
-0 9 * * 1  NOTION_TOKEN=secret_... SWANLAKE_POSTURE_PAGE_ID=34c0... $HOME/projects/Swanlake/tools/sync-posture.py pull >> $HOME/.claude/logs/sync-posture.log 2>&1
+0 9 * * 1  NOTION_TOKEN=secret_... SWANLAKE_POSTURE_PAGE_ID=<your-page-id> $HOME/projects/Swanlake/tools/sync-posture.py pull >> $HOME/.claude/logs/sync-posture.log 2>&1
 ```
 
 Better: keep the token in a mode-600 env file and source it.

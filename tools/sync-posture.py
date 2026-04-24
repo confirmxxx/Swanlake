@@ -37,8 +37,10 @@ Environment variables (all optional unless marked):
 
     SWANLAKE_POSTURE_PAGE_ID   Notion page id for the Security Posture
                                page (for mode ``pull``).
-                               Default (placeholder — override in your env):
-                               34c018ae-d8f8-81ce-8bd1-fbf80defc1e6
+                               Default is an obvious all-zeros
+                               placeholder; mode ``pull`` will 404 until
+                               you override it with your real page id:
+                               00000000-0000-0000-0000-000000000000
 
     NOTION_TOKEN               REQUIRED for mode ``pull``. Notion
                                integration bearer token with read access
@@ -85,10 +87,12 @@ LAST_RUN = Path(os.environ.get(
     "SWANLAKE_LAST_RUN", str(HOME / ".claude/.last-watchdog-run")
 ))
 
-# Placeholder — override with your own page id in the env before using
-# mode `pull`. Keeping a concrete-shaped default makes copy-paste errors
-# obvious (a UUID string is easier to spot-check than an empty string).
-DEFAULT_PAGE_ID = "34c018ae-d8f8-81ce-8bd1-fbf80defc1e6"
+# Obvious all-zeros placeholder — YOU MUST override via the
+# SWANLAKE_POSTURE_PAGE_ID env var before using mode `pull`, otherwise
+# Notion will return 404. Keeping a UUID-shaped default (instead of
+# empty string) so shape-checking code paths still exercise normally,
+# but the all-zeros form can't be mistaken for a real page id.
+DEFAULT_PAGE_ID = "00000000-0000-0000-0000-000000000000"
 POSTURE_PAGE_ID = os.environ.get("SWANLAKE_POSTURE_PAGE_ID", DEFAULT_PAGE_ID)
 
 NOTION_API = "https://api.notion.com/v1"
