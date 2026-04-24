@@ -48,6 +48,28 @@ Supporting documentation:
 5. **Stdlib first.** Reference implementations use Python + bash stdlib where possible. Zero pip installs for the baseline.
 6. **Local registry for attribution.** Canary tokens are local secrets. Swanlake ships the schema and generator, never the tokens.
 
+## What it looks like in practice
+
+Once wired, the Swanlake status segment becomes a quiet shield in your terminal:
+
+```
+~/projects/myapp  main  opus-4.7  xhigh  🛡
+```
+
+Clean shield = clean posture. When something needs attention, flags appear next to it:
+
+| You see | In English |
+|---|---|
+| `🛡` | All green. Keep working. |
+| `🛡?` | No watchdog fired yet. Run it once. |
+| `🛡stale:3d` | Posture 3 days old. Fine, but getting dusty. |
+| `🛡!stale:9d` | **Stale gate active.** No new MCPs / OAuth grants until refreshed. |
+| `🛡canary:1` | Tripwire fired today. Check `~/.claude/canary-hits/`. |
+| `🛡exfil:2` | Secret-shape payloads blocked. Check `~/.claude/exfil-alerts/`. |
+| `🛡!stale:8d,canary:1` | Multiple issues. Triage newest first. |
+
+Because a dashboard you have to open. A shield in your status line you see every time you glance at your terminal. Full cheat sheet + integration in [`tools/README.md`](./tools/README.md).
+
 ## Getting started — Claude Code
 
 ```bash

@@ -6,6 +6,77 @@ Small utilities that compose with the Swanlake primitives. Each is optional; not
 
 Terse health indicator for a shell status line, Starship/powerlevel segment, or Claude Code status-line hook. Reads local posture state + today's hit logs and emits a single short string.
 
+Think of it as a smoke detector for your agent stack. You glance at your terminal — if the shield is quiet, you're good. If it's shouting, read the flags.
+
+### What the shield means (cheat sheet)
+
+| You see | Vibe | What's happening | What to do |
+|---|---|---|---|
+| `🛡` | 🟢 green | Clean posture, routine fresh | Nothing — keep working |
+| `🛡?` | ⚪ gray | No watchdog has fired yet | Fire the routine once to initialize, OR install the systemd timer, OR `date -u +%Y-%m-%dT%H:%M:%SZ > ~/.claude/.last-watchdog-run` |
+| `🛡stale:3d` | 🟡 yellow | Threat posture 2–6 days old | No rush — watchdog will refresh on next scheduled run. Manual fire if you're paranoid. |
+| `🛡!stale:9d` | 🔴 red | Posture ≥7 days old — **staleness gate is active** | Fire the routine now. Until you do, Claude Code will refuse new MCP installs / new OAuth scopes / new plugin loads (beacon rule A11). |
+| `🛡canary:1` | 🔴 red | A canary tripwire matched a tool output today | Open `~/.claude/canary-hits/$(date -u +%Y-%m-%d).jsonl`. Was it you running `verify-beacons.py`? Benign. Otherwise investigate which surface leaked. |
+| `🛡exfil:2` | 🔴 red | Secret-shape payloads flagged by the exfil-monitor hook today | Open `~/.claude/exfil-alerts/…`. Check whether the shape was a false positive (e.g. a legit hex string in your test fixture) or something actually trying to leave. |
+| `🛡inject:1` | 🔴 red | Prompt-injection markers in fetched content today | Open `~/.claude/content-safety/…`. Usually a scraped page tried to speak in imperatives. |
+| `🛡!stale:8d,canary:1` | 🔴 red | Multiple issues stacked | Triage in order: newest alert first, staleness second (it's informational once you know). |
+
+### Decision flow — "I see X, what now?"
+
+```
+See the 🛡 at all?
+├── no  → status line doesn't include the segment yet; install per Integrations below
+└── yes → anything after it?
+          ├── nothing                → all good, keep working
+          ├── "?"                    → fire the routine once to bootstrap the last-run file
+          ├── "stale:Nd"  (N<7)      → watchdog is watching; no action needed
+          ├── "!stale:Nd" (N≥7)      → gate ACTIVE; refresh now, or disable A11 if intentional
+          ├── "canary:N"             → a tripwire hit — open canary-hits log
+          ├── "exfil:N"              → secret-shape payload blocked — open exfil-alerts log
+          ├── "inject:N"             → prompt-injection flagged — open content-safety log
+          └── multiple, comma'd      → treat like a stack trace; triage newest first
+```
+
+### First-run mental model
+
+Right after you wire the segment:
+1. You'll probably see `🛡?` — no watchdog has fired yet.
+2. Run the watchdog manually (or wait for its next scheduled run).
+3. Shield becomes `🛡` — all green.
+4. Walk away for a week: glyph ages `🛡stale:3d` → `🛡!stale:9d`. Your laptop was off, posture drifted, refresh when you return.
+
+### When to panic vs when to chill
+
+- `🛡`                         → don't even look at the status line
+- `🛡?` or `🛡stale:Nd`        → todo list, not alarm
+- `🛡!stale:Nd`                → actionable but not urgent (the gate is already enforcing for you)
+- `🛡canary:N` / `🛡exfil:N`   → drop what you're doing, open the log, triage
+- multiple flags stacked      → same — newest first, cheapest to resolve first
+
+### Why a glyph instead of a dashboard
+
+A dashboard requires opening. A shield in your status line is in your peripheral vision every time you type. Friction determines whether you check; glanceability determines whether you notice.
+
+### Troubleshooting
+
+**I see `🛡?` and it won't go away.**
+The script can't find a last-run timestamp. Pick one:
+- Fire the watchdog routine once manually → it writes `~/.claude/.last-watchdog-run`
+- Install the systemd user timer → it writes `~/.claude/.watchdog-tick` on a schedule
+- Write the file by hand: `date -u +%Y-%m-%dT%H:%M:%SZ > ~/.claude/.last-watchdog-run`
+
+**I see `🛡canary:1` but I just ran `verify-beacons.py` myself.**
+Expected. The verifier reads files containing canary strings, the canary-match hook sees them, logs them. It's a benign self-hit. Clear today's log if it's bothering you: `rm ~/.claude/canary-hits/$(date -u +%Y-%m-%d).jsonl`.
+
+**I want it to stay quiet when clean.**
+Set `SWANLAKE_STATUS_STYLE=silent` in your shell env. The segment emits nothing until something's off.
+
+**My status bar is cramped; stacked flags overflow.**
+Same env var. Shield disappears when green, appears only when it has something to say.
+
+**What if the posture file is corrupt / unreadable?**
+Script exits 0 silently and falls back to `🛡?`. Never breaks your status line.
+
 ### Output grammar
 
 | Output | Meaning |
