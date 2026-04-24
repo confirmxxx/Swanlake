@@ -2,6 +2,129 @@
 
 Small utilities that compose with the Swanlake primitives. Each is optional; nothing in the main packages depends on them.
 
+## `sync-posture.py`
+
+Bridges the *remote* posture signal (the `Last verified:` field on the Notion Security Posture page, maintained by the scheduled watchdog routine) to the *local* freshness file that `status-segment.py` reads (`~/.claude/.last-watchdog-run`). Without this bridge, the routine can keep Notion fresh while your terminal's shield still shows `🛡?` — because the local file never got touched.
+
+### Three-mode cheat sheet
+
+| Mode | Network | Requires | What it does |
+|---|---|---|---|
+| `now` (default) | none | — | Writes the current UTC timestamp to `$SWANLAKE_LAST_RUN`. The "I just reviewed the Notion page by eye, posture is fresh from here" manual confirmation. |
+| `pull` | Notion API | `NOTION_TOKEN` env var | Fetches the posture page, finds the `Last verified: <iso>` line, writes that timestamp to `$SWANLAKE_LAST_RUN`. |
+| `check` | none | — | Prints `<state> <N_days>` where state is `fresh` / `yellow` / `red` / `unknown`. Same thresholds as `status-segment.py`. |
+
+### Examples
+
+```bash
+# Manual confirmation — I just eyeballed the posture page, everything's fresh
+./tools/sync-posture.py           # or: ./tools/sync-posture.py now
+
+# Fetch the actual timestamp from Notion (requires read-scoped integration token)
+export NOTION_TOKEN="secret_..."
+export SWANLAKE_POSTURE_PAGE_ID="34c018ae-d8f8-81ce-8bd1-fbf80defc1e6"
+./tools/sync-posture.py pull
+# → synced: 2026-04-24T10:15:33Z
+
+# Just check current local state
+./tools/sync-posture.py check
+# → fresh 0
+# → yellow 3
+# → red 9
+# → unknown -1
+```
+
+### Configuration (all env vars)
+
+| Variable | Default | Used by | Effect |
+|---|---|---|---|
+| `SWANLAKE_LAST_RUN` | `~/.claude/.last-watchdog-run` | all | Path to the ISO-UTC timestamp file. Shared with `status-segment.py`. |
+| `SWANLAKE_POSTURE_PAGE_ID` | placeholder UUID | `pull` | Notion page id of the Security Posture page. **Override this** — the shipped default is a placeholder, not a real page. |
+| `NOTION_TOKEN` | (unset) | `pull` | Bearer token for a Notion integration with read access to the posture page. **Required** for `pull`. |
+| `SWANLAKE_STALE_YELLOW` | `2` | `check` | Days triggering the yellow band. |
+| `SWANLAKE_STALE_RED` | `7` | `check` | Days triggering the red band. |
+
+### Exit semantics
+
+| Code | Meaning |
+|---|---|
+| `0` | Success. |
+| `2` | Config missing (e.g. `NOTION_TOKEN` unset in `pull` mode). |
+| `3` | HTTP / network error talking to Notion. |
+| `4` | Parse error — couldn't find or parse a `Last verified:` timestamp on the page. |
+
+`$SWANLAKE_LAST_RUN` is never overwritten on any error path. Writes are atomic (tempfile + `os.replace`) so the status segment never observes a half-written file.
+
+### Integrations
+
+#### Manual fire (ad-hoc, after eyeballing Notion)
+
+```bash
+~/projects/Swanlake/tools/sync-posture.py
+```
+
+#### Weekly cron (Monday 09:00 local, pull mode)
+
+```cron
+0 9 * * 1  NOTION_TOKEN=secret_... SWANLAKE_POSTURE_PAGE_ID=34c0... $HOME/projects/Swanlake/tools/sync-posture.py pull >> $HOME/.claude/logs/sync-posture.log 2>&1
+```
+
+Better: keep the token in a mode-600 env file and source it.
+
+```cron
+0 9 * * 1  . $HOME/.config/swanlake/env && $HOME/projects/Swanlake/tools/sync-posture.py pull >> $HOME/.claude/logs/sync-posture.log 2>&1
+```
+
+#### systemd user timer
+
+`~/.config/systemd/user/swanlake-sync-posture.service`:
+
+```ini
+[Unit]
+Description=Swanlake — pull posture freshness from Notion
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/swanlake/env
+ExecStart=%h/projects/Swanlake/tools/sync-posture.py pull
+```
+
+`~/.config/systemd/user/swanlake-sync-posture.timer`:
+
+```ini
+[Unit]
+Description=Weekly Swanlake posture pull
+
+[Timer]
+OnCalendar=Mon 09:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user enable --now swanlake-sync-posture.timer
+```
+
+### Credential honesty
+
+Mode `pull` requires a Notion integration token with **read access scoped to the posture page only** — not the whole workspace. Treat the token the way Swanlake asks you to treat all canary/beacon material:
+
+- Local-only. Never commit it. `.env`, `~/.config/swanlake/env`, or your OS keychain — not the repo.
+- Treat as burned if it shows up in a PR, a terminal recording, a paste buffer sent to someone, or a log file you can't guarantee is local. Rotate at the Notion integrations page.
+- Scope minimally. If you only need the posture page, share only the posture page with the integration.
+
+The offline `now` mode exists precisely so you don't have to stand up a token for casual use — eyeball the Notion page, run `./sync-posture.py`, done.
+
+### Pairs with
+
+`status-segment.py` reads the same `$SWANLAKE_LAST_RUN` file. The pipeline is: remote routine updates Notion → `sync-posture.py` pulls Notion's timestamp to the local file → status segment renders green. Break any link and the shield falls back to `🛡?` or `🛡stale:Nd`.
+
+### Dependencies
+
+Python 3.10+ stdlib only. `urllib.request` for HTTP. No `pip install` required.
+
 ## `status-segment.py`
 
 Terse health indicator for a shell status line, Starship/powerlevel segment, or Claude Code status-line hook. Reads local posture state + today's hit logs and emits a single short string.

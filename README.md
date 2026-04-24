@@ -68,6 +68,8 @@ Clean shield = clean posture. When something needs attention, flags appear next 
 | `🛡exfil:2` | Secret-shape payloads blocked. Check `~/.claude/exfil-alerts/`. |
 | `🛡!stale:8d,canary:1` | Multiple issues. Triage newest first. |
 
+Sync the shield's freshness signal from the Notion posture page via `tools/sync-posture.py`.
+
 Because a dashboard you have to open. A shield in your status line you see every time you glance at your terminal. Full cheat sheet + integration in [`tools/README.md`](./tools/README.md).
 
 ## Getting started — Claude Code
