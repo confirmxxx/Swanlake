@@ -9,11 +9,19 @@
 #   ./apply-mcp-scopes.sh --dry-run         # same as default
 #   ./apply-mcp-scopes.sh --apply           # writes changes; backs up originals first
 #   ./apply-mcp-scopes.sh --apply --only=<filename.md>  # single file
+#   ./apply-mcp-scopes.sh --apply --force   # proceed even if preflight finds orphans
 #   ./apply-mcp-scopes.sh --help
 #
 # Config:
 #   AGENTS_DIR       — directory of *.md agent files (default ~/.claude/agents)
 #   ZONES_FILE       — path to zones.yaml (default: ./zones.yaml next to this script)
+#
+# Preflight validation:
+#   At startup, the filenames listed in zones.yaml are diffed against actual
+#   *.md files under AGENTS_DIR. Orphans (listed but missing on disk) are
+#   reported as warnings and abort unless --force is passed — silent
+#   fall-back-to-UNCLASSIFIED on a typo is a footgun. Files on disk but not
+#   in zones.yaml are reported as UNCLASSIFIED (non-fatal, fail-closed).
 #
 # Backup location (apply mode only): ~/.claude/agents-backup-YYYYMMDD-HHMMSS/
 #
@@ -31,14 +39,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZONES_FILE="${ZONES_FILE:-$SCRIPT_DIR/zones.yaml}"
 MODE="dry-run"
 ONLY=""
+FORCE="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --apply)   MODE="apply"; shift ;;
     --dry-run) MODE="dry-run"; shift ;;
     --only=*)  ONLY="${1#*=}"; shift ;;
+    --force)   FORCE="1"; shift ;;
     --help|-h)
-      sed -n '2,30p' "$0"
+      sed -n '2,38p' "$0"
       exit 0
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -63,7 +73,7 @@ if [[ "$MODE" == "apply" ]]; then
   echo "backup dir: $BACKUP_DIR"
 fi
 
-export AGENTS_DIR ZONES_FILE MODE ONLY BACKUP_DIR
+export AGENTS_DIR ZONES_FILE MODE ONLY BACKUP_DIR FORCE
 
 python3 - <<'PYEOF'
 import os
@@ -77,6 +87,7 @@ ZONES_FILE = Path(os.environ["ZONES_FILE"])
 MODE = os.environ["MODE"]
 ONLY = os.environ.get("ONLY", "")
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "")
+FORCE = os.environ.get("FORCE", "0") == "1"
 
 # MCP alias table. Edit to add new aliases. Order inside each list is
 # deliberate — keep it stable for diff sanity.
@@ -113,10 +124,12 @@ def load_zones(path):
         <agent-filename> <ZONE> [<mcp1,mcp2,...>]
     Comments start with #. Blank lines ignored.
 
-    Validates that every filename exists under AGENTS_DIR — SPEC mandates
-    this; silent typos-become-UNCLASSIFIED is a footgun."""
+    Returns (classify, orphans). Orphans is the list of `{path}:{lineno}: {name}`
+    strings for filenames listed in zones.yaml that do not exist under
+    AGENTS_DIR. Caller decides whether to abort (default) or proceed (--force).
+    """
     classify = {}
-    missing = []
+    orphans = []
     for lineno, raw in enumerate(path.read_text().splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -131,22 +144,48 @@ def load_zones(path):
             raise SystemExit(
                 f"{path}:{lineno}: invalid zone {zone!r}. Valid: {sorted(VALID_ZONES)}"
             )
-        # Path-traversal / non-.md guard
+        # Path-traversal / non-.md guard — still a hard fail; a malformed
+        # filename cannot be --force'd past, it is a syntax error.
         if "/" in filename or "\\" in filename or not filename.endswith(".md"):
             raise SystemExit(
                 f"{path}:{lineno}: filename must be a plain *.md basename, got {filename!r}"
             )
         if not (AGENTS_DIR / filename).exists():
-            missing.append(f"{path}:{lineno}: {filename}")
+            orphans.append(f"{path}:{lineno}: {filename}")
         mcp_aliases = [a.strip() for a in mcp_list_str.split(",") if a.strip()]
         classify[filename] = (zone, mcp_aliases)
-    if missing:
+    return classify, orphans
+
+
+def preflight(classify, orphans, on_disk):
+    """Report orphans + unclassified before processing. Aborts on orphans
+    unless --force was passed. UNCLASSIFIED (on-disk but not listed) is only
+    a warning — fail-closed default (mcpServers: []) already limits blast
+    radius; loud reporting is the remediation."""
+    listed = set(classify.keys())
+    disk_names = {f.name for f in on_disk}
+    unlisted = sorted(disk_names - listed)
+
+    if orphans:
         sys.stderr.write(
-            "error: filenames in zones.yaml do not exist under AGENTS_DIR "
-            f"({AGENTS_DIR}):\n  " + "\n  ".join(missing) + "\n"
+            "preflight: filenames in zones.yaml do not exist under AGENTS_DIR "
+            f"({AGENTS_DIR}):\n  " + "\n  ".join(orphans) + "\n"
         )
-        sys.exit(1)
-    return classify
+        if not FORCE:
+            sys.stderr.write(
+                "aborting — typo'd entries would silently fall back to "
+                "UNCLASSIFIED without this check. Pass --force to proceed "
+                "anyway, or fix the filenames in zones.yaml.\n"
+            )
+            sys.exit(1)
+        sys.stderr.write("--force: proceeding despite orphans.\n")
+
+    if unlisted:
+        sys.stderr.write(
+            "preflight: agent files on disk are not listed in zones.yaml "
+            "(will default to UNCLASSIFIED / mcpServers: []):\n  "
+            + "\n  ".join(unlisted) + "\n"
+        )
 
 
 def split_frontmatter(text):
@@ -222,8 +261,11 @@ def process_file(path, classify):
 
 
 def main():
-    classify = load_zones(ZONES_FILE)
+    classify, orphans = load_zones(ZONES_FILE)
     files = sorted(AGENTS_DIR.glob("*.md"))
+    # Preflight runs against the full on-disk set, not the --only subset,
+    # so typos are caught even when operating on a single file.
+    preflight(classify, orphans, files)
     if ONLY:
         files = [f for f in files if f.name == ONLY]
         if not files:

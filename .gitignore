@@ -8,6 +8,7 @@
 # Generated beacon outputs with filled-in per-surface canary tokens.
 defense-beacon/reference/out/
 defense-beacon/reference/.canary-state.json
+defense-beacon/reference/.canary-state.json.lock
 
 # Any canary registry file that happens to be inside the tree.
 canary-strings.txt
