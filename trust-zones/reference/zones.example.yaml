@@ -1,0 +1,49 @@
+# zones.yaml — trust-zone classification for every agent in the agents dir.
+#
+# Format (one line per agent):
+#   <agent-filename> <ZONE> [<mcp1,mcp2,...>]
+#
+# Zones:
+#   UNTRUSTED-INPUT  — agents that consume external content. Read-only MCPs.
+#   INTERNAL         — agents that operate on local code/vault/user input.
+#   HIGH-TRUST       — agents that write to canonical stores, touch money.
+#   SEGREGATED       — persona/voice-only. No MCPs.
+#
+# MCP aliases (see reference/apply-mcp-scopes.sh ALIASES table):
+#   ctx7, pw, tg, magic, notion, supabase, vercel, miro, gdrive
+#
+# Any agent filename not listed below defaults to mcpServers: [] (no MCPs).
+# That's fail-closed; prefer explicit classification.
+#
+# Copy this file to zones.yaml and edit.
+
+# ---- SEGREGATED (no MCPs at all) ----
+# agent-persona-voice.md SEGREGATED
+# agent-narrator-academic.md SEGREGATED
+
+# ---- UNTRUSTED-INPUT (consume external content) ----
+# agent-web-scraper.md UNTRUSTED-INPUT pw
+# agent-email-parser.md UNTRUSTED-INPUT ctx7
+# agent-social-signals.md UNTRUSTED-INPUT pw
+# agent-trend-researcher.md UNTRUSTED-INPUT ctx7
+
+# ---- HIGH-TRUST (write to canonical stores / touch money) ----
+# agent-accounts-payable.md HIGH-TRUST supabase
+# agent-report-writer.md HIGH-TRUST notion
+# agent-data-consolidation.md HIGH-TRUST supabase
+# agent-legal-review.md HIGH-TRUST notion, gdrive
+# agent-deploy-manager.md HIGH-TRUST vercel
+
+# ---- INTERNAL (local code/vault/user input) ----
+# agent-backend-architect.md INTERNAL ctx7
+# agent-frontend-dev.md INTERNAL magic, ctx7, pw
+# agent-ui-designer.md INTERNAL magic, ctx7, pw
+# agent-code-reviewer.md INTERNAL ctx7
+# agent-test-runner.md INTERNAL ctx7
+# agent-docs-writer.md INTERNAL ctx7
+# agent-brand-guardian.md INTERNAL magic
+
+# ---- Example dev-time specialists with no MCP needs ----
+# agent-game-designer.md INTERNAL
+# agent-sales-coach.md INTERNAL
+# agent-recruitment-specialist.md INTERNAL

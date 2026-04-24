@@ -1,0 +1,62 @@
+# Example zones.yaml — synthetic agent pack
+#
+# This is a worked example showing realistic classifications across the
+# four zones for a hypothetical agent pack. Use as a starting template.
+
+# ---- SEGREGATED ----
+# Agents that run in their own session with zero MCPs. Typically persona-
+# driven text generation where arbitrary tool access is the risk.
+agent-persona-voice.md             SEGREGATED
+agent-narrator-academic.md         SEGREGATED
+agent-historical-persona.md        SEGREGATED
+
+# ---- UNTRUSTED-INPUT ----
+# Content-consuming agents. Browser, docs, email — never writers.
+agent-web-scraper.md               UNTRUSTED-INPUT  pw
+agent-email-intake.md              UNTRUSTED-INPUT  ctx7
+agent-social-signal-monitor.md     UNTRUSTED-INPUT  pw
+agent-competitive-research.md      UNTRUSTED-INPUT  pw, ctx7
+agent-trend-aggregator.md          UNTRUSTED-INPUT  pw
+agent-inbound-messaging.md         UNTRUSTED-INPUT  tg
+agent-support-responder-intake.md  UNTRUSTED-INPUT  ctx7
+
+# ---- HIGH-TRUST ----
+# Writers to canonical stores, money-touching, production-action agents.
+agent-accounts-payable.md          HIGH-TRUST  supabase
+agent-data-pipeline-writer.md      HIGH-TRUST  supabase
+agent-report-distribution.md       HIGH-TRUST  notion, gdrive
+agent-deploy-manager.md            HIGH-TRUST  vercel
+agent-finance-tracker.md           HIGH-TRUST  notion, supabase
+agent-legal-compliance.md          HIGH-TRUST  notion, gdrive
+agent-compliance-auditor.md        HIGH-TRUST  notion, supabase
+agent-identity-graph-operator.md   HIGH-TRUST  supabase, notion
+agent-knowledge-steward.md         HIGH-TRUST  notion
+
+# ---- INTERNAL ----
+# Dev-time specialists. Docs, UI gen, browser for verification only.
+agent-backend-architect.md         INTERNAL  ctx7
+agent-frontend-dev.md              INTERNAL  magic, ctx7, pw
+agent-ui-designer.md               INTERNAL  magic, ctx7, pw
+agent-ux-architect.md              INTERNAL  magic, ctx7, pw
+agent-mobile-app-builder.md        INTERNAL  ctx7
+agent-code-reviewer.md             INTERNAL  ctx7
+agent-database-optimizer.md        INTERNAL  ctx7
+agent-devops-automator.md          INTERNAL  ctx7
+agent-test-runner.md               INTERNAL  ctx7
+agent-accessibility-auditor.md     INTERNAL  ctx7, pw
+agent-performance-benchmarker.md   INTERNAL  ctx7
+agent-technical-writer.md          INTERNAL  ctx7
+agent-sre.md                       INTERNAL  ctx7
+agent-security-engineer.md         INTERNAL  ctx7
+agent-rapid-prototyper.md          INTERNAL  magic, ctx7, pw
+agent-ai-engineer.md               INTERNAL  ctx7
+agent-mcp-builder.md               INTERNAL  ctx7
+
+# Internal specialists that don't need MCPs
+agent-game-designer.md             INTERNAL
+agent-narrative-designer.md        INTERNAL
+agent-level-designer.md            INTERNAL
+agent-sales-coach.md               INTERNAL
+agent-recruitment-specialist.md    INTERNAL
+agent-sprint-prioritizer.md        INTERNAL
+agent-project-manager.md           INTERNAL

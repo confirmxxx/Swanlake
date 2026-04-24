@@ -1,0 +1,31 @@
+Swanlake — defense-in-depth security subroutine layer for AI agents
+Copyright (c) 2026 confirmxxx
+
+This product includes software developed by the Swanlake project
+(https://github.com/confirmxxx/Swanlake).
+
+Licensed under the Apache License, Version 2.0. You may obtain a copy of the
+License at: http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+
+Swanlake draws on prior work in the agent-security research space. The
+following projects and publications informed the design; Swanlake is not
+derived from their source code but acknowledges their influence on the
+problem framing.
+
+- OWASP Top 10 for Large Language Model Applications (2025 edition)
+  https://genai.owasp.org/llm-top-10/
+- Model Context Protocol specification, incremental-scope authorization
+  https://modelcontextprotocol.io/specification/draft/basic/authorization
+- Anthropic — "Mitigating the risk of prompt injections in browser use" (2025)
+  https://www.anthropic.com/news/prompt-injection-defenses
+- DeepMind — "AI Agent Traps" taxonomy (SSRN 6372438, March 2026)
+- Academic prompt-injection and RAG-poisoning literature, 2023–2026.
+  See THREAT-MODEL.md for the citation list.
+
+--------------------------------------------------------------------------------
+
+Third-party dependencies declared in each package's metadata file.
+Swanlake's reference implementations are stdlib-only where possible to
+minimize the dependency surface.

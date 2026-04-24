@@ -1,0 +1,50 @@
+# surfaces.yaml — one surface-id per line, # comments ignored.
+#
+# Copy this file to surfaces.yaml and edit to list the surfaces your
+# deployment covers. Surface IDs MUST be stable — changing an id
+# invalidates that surface's history.
+#
+# Recommended naming conventions (use generic labels; avoid
+# project-internal codenames if you plan to publish artifacts):
+#
+#   <surface-type>-<scope>
+#
+#   cms-<scope>         — workspace page / doc / wiki surface
+#   db-<scope>          — database project description / meta row
+#   deploy-<scope>      — deployment project / env var surface
+#   repo-<scope>        — code repository README / SECURITY.md
+#   routine-<scope>     — scheduled-routine system prompt
+#   agent-<scope>       — local agent-harness config file
+#   vault-<scope>       — knowledge-vault root / key notes
+
+# ---- example surfaces — replace with your own ----
+
+# Workspace pages
+cms-workspace-root
+cms-project-alpha
+cms-project-beta
+
+# Database projects
+db-project-alpha
+db-project-beta
+
+# Deploy projects
+deploy-project-alpha
+deploy-project-beta
+
+# Code repositories
+repo-project-alpha
+repo-project-beta
+
+# Scheduled routines (e.g. intel watchdogs)
+routine-intel-weekly
+routine-audit-monthly
+
+# Local agent-harness configs
+agent-harness-global
+agent-project-alpha
+
+# Knowledge vault
+vault-root
+vault-patterns
+vault-decisions

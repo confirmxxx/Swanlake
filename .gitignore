@@ -1,0 +1,49 @@
+# Swanlake — .gitignore
+#
+# Local state and generated artifacts that MUST NOT be committed. The
+# canary registry in particular is a LOCAL secret: publishing it defeats
+# the entire attribution mechanism (see docs/THREAT-MODEL.md §"Registry
+# lives only on the local dev host").
+
+# Generated beacon outputs with filled-in per-surface canary tokens.
+defense-beacon/reference/out/
+defense-beacon/reference/.canary-state.json
+
+# Any canary registry file that happens to be inside the tree.
+canary-strings.txt
+**/canary-strings.txt
+
+# Local verifier config — can contain local file paths, op-specific metadata.
+defense-beacon/reference/verify.local.yaml
+trust-zones/reference/zones.local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node / TS (for future @swanlake/node package)
+node_modules/
+dist/
+.turbo/
+.next/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local-only overrides
+*.local
+*.local.*

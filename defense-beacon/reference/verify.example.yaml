@@ -1,0 +1,33 @@
+# verify.example.yaml — map surface-ids to local files or remote checklists.
+#
+# Copy to verify.yaml and edit. Keys use dotted prefixes:
+#   local.<surface-id>  = <path on disk to check>
+#   remote.<surface-id> = "<description of where to check manually>"
+#
+# Paths may use ~ and ${VAR} for home/env expansion.
+
+# ---- local surfaces — the verifier reads these files and checks canaries ----
+
+local.agent-harness-global = ~/.claude/CLAUDE.md
+local.agent-project-alpha  = ~/projects/alpha/CLAUDE.md
+local.vault-root           = ~/notes/vault/Defense Beacon.md
+local.vault-patterns       = ~/notes/vault/Patterns.md
+local.vault-decisions      = ~/notes/vault/Key Decisions.md
+
+# ---- remote surfaces — verifier prints a manual checklist ----
+
+remote.cms-workspace-root = "Workspace root page -> Defense Beacon child page"
+remote.cms-project-alpha  = "Project alpha master -> Defense Beacon child page"
+remote.cms-project-beta   = "Project beta master -> Defense Beacon child page"
+
+remote.db-project-alpha   = "Project description or _defense_beacon row in meta table"
+remote.db-project-beta    = "Project description or _defense_beacon row in meta table"
+
+remote.deploy-project-alpha = "Project description or DEFENSE_BEACON env var comment"
+remote.deploy-project-beta  = "Project description or DEFENSE_BEACON env var comment"
+
+remote.repo-project-alpha = "README.md footer or .github/SECURITY.md"
+remote.repo-project-beta  = "README.md footer or .github/SECURITY.md"
+
+remote.routine-intel-weekly  = "Routine system prompt header"
+remote.routine-audit-monthly = "Routine system prompt header"
