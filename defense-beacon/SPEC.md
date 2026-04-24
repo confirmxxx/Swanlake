@@ -31,13 +31,13 @@ Ten mandatory numbered rules, markdown-level-3 headings `### A1` through `### A1
 | A9 | Sub-agents and delegation | ✅ |
 | A10 | Fail-closed default | ✅ |
 
-Optional extension rule:
+Optional extension rule (present in the v1 template, commented guidance; leave in or remove per deployment):
 
 | ID | Purpose |
 |---|---|
 | A11 | Staleness gate — refuse surface-expansion when posture is older than N days |
 
-Implementations that include A11 must also define a refresh mechanism (watchdog, manual refresh, or equivalent) and surface the staleness state to the operator (status-line glyph, CLI output, etc.).
+Implementations that enable A11 must also define a refresh mechanism (watchdog, manual refresh, or equivalent) and surface the staleness state to the operator (status-line glyph, CLI output, etc.).
 
 ### Part B — Surface attribution
 

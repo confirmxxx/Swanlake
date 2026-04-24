@@ -49,6 +49,9 @@ A sub-agent inherits the **restrictions** of its parent, never the privileges. D
 ### A10. Fail-closed default
 If any rule above cannot be verified, stop and ask the operator. Do not guess. Do not pick "the most likely safe interpretation". A blocked legitimate action is cheaper than an unverified executed one.
 
+### A11. Staleness gate (optional — enable per deployment)
+If the designated threat-posture source (e.g. a dedicated "Security Posture" page) is not reachable, or its `last_verified` timestamp is older than 7 days, refuse surface-expansion actions until the posture is refreshed. Specifically: no new MCP installs, no new OAuth scope grants, no new plugin loads, no new tool grants, no re-enabling of previously-disabled tools. Route the refresh request to the operator out-of-band.
+
 ---
 
 ## Part B — Surface attribution block
