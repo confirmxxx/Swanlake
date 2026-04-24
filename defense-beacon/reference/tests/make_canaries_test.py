@@ -8,8 +8,10 @@ Runs with stdlib unittest; no external deps. From the repo root:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -191,6 +193,114 @@ class PathTraversalGuardTest(unittest.TestCase):
             finally:
                 mc.BEACON_TEMPLATE = orig_tpl
                 mc.OUT_DIR = orig_out
+
+
+class ConcurrencyLockTest(unittest.TestCase):
+    """P5 — concurrent invocations must not corrupt state. The fcntl.flock
+    LOCK_EX|LOCK_NB acquired in _acquire_lock serializes the state
+    read-modify-write sequence. Second process gets BlockingIOError,
+    prints a clear error, and exits non-zero — no silent last-writer-wins."""
+
+    def test_second_invocation_rejected_while_first_holds_lock(self):
+        """Open a lock by hand, then run make-canaries.py as a subprocess
+        against the same state file. The subprocess must fail fast with
+        exit code 2 and a message naming the lock file — not clobber state."""
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as d:
+            d_path = Path(d)
+            # Isolate state/out/registry/template so the test does not touch
+            # the real repo layout. make-canaries resolves these from the
+            # script location, so we drive it via a wrapper that points to
+            # a scratch dir.
+            scratch_repo = d_path / "reference"
+            scratch_repo.mkdir()
+            template = scratch_repo / "beacon-template-v1.md"
+            template.write_text(
+                "id={{SURFACE_ID}} t1={{CANARY_TOKEN_1}} "
+                "t2={{CANARY_TOKEN_2}} at={{ISSUED_UTC}}\n"
+            )
+            surfaces = scratch_repo / "surfaces.yaml"
+            surfaces.write_text("alpha-one\nbeta-two\n")
+            # Copy make-canaries.py into the scratch repo so imports and
+            # REPO_DIR resolution work unmodified.
+            import shutil
+            shutil.copy2(MODULE_PATH, scratch_repo / "make-canaries.py")
+
+            state_file = scratch_repo / ".canary-state.json"
+            lock_path = state_file.with_suffix(state_file.suffix + ".lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            holder = open(lock_path, "w")
+            try:
+                fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                # Registry goes somewhere writable and scratch.
+                env = dict(os.environ)
+                env["SWANLAKE_REGISTRY"] = str(d_path / "registry.txt")
+                result = subprocess.run(
+                    [sys.executable, str(scratch_repo / "make-canaries.py")],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertEqual(
+                    result.returncode, 2,
+                    f"expected exit 2 when lock is held, got {result.returncode}.\n"
+                    f"stdout={result.stdout}\nstderr={result.stderr}"
+                )
+                self.assertIn(".lock", result.stderr)
+                self.assertIn("another make-canaries", result.stderr)
+                # State must not exist — the second invocation must have
+                # bailed before writing anything.
+                self.assertFalse(
+                    state_file.exists(),
+                    "state file was written despite lock contention — race present",
+                )
+            finally:
+                try:
+                    fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                holder.close()
+
+    def test_sequential_invocations_do_not_corrupt_state(self):
+        """After lock released, a fresh invocation proceeds and writes a
+        valid JSON state file. Validates the happy path is unaffected by
+        the locking instrumentation."""
+        with tempfile.TemporaryDirectory() as d:
+            d_path = Path(d)
+            scratch_repo = d_path / "reference"
+            scratch_repo.mkdir()
+            (scratch_repo / "beacon-template-v1.md").write_text(
+                "id={{SURFACE_ID}} t1={{CANARY_TOKEN_1}} "
+                "t2={{CANARY_TOKEN_2}} at={{ISSUED_UTC}}\n"
+            )
+            (scratch_repo / "surfaces.yaml").write_text("alpha-one\n")
+            import shutil
+            shutil.copy2(MODULE_PATH, scratch_repo / "make-canaries.py")
+
+            env = dict(os.environ)
+            env["SWANLAKE_REGISTRY"] = str(d_path / "registry.txt")
+
+            # First run: cold state.
+            r1 = subprocess.run(
+                [sys.executable, str(scratch_repo / "make-canaries.py")],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(r1.returncode, 0, f"first run failed: {r1.stderr}")
+
+            # Second run: warm state, should reuse.
+            r2 = subprocess.run(
+                [sys.executable, str(scratch_repo / "make-canaries.py")],
+                env=env, capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(r2.returncode, 0, f"second run failed: {r2.stderr}")
+
+            state = json.loads((scratch_repo / ".canary-state.json").read_text())
+            self.assertIn("alpha-one", state["surfaces"])
+            self.assertIn("shaped", state["surfaces"]["alpha-one"])
+            self.assertIn("phrase", state["surfaces"]["alpha-one"])
 
 
 if __name__ == "__main__":
