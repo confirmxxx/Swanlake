@@ -54,3 +54,22 @@ Thumbs.db
 # must never be committed; they may contain reproduction strings drawn from
 # adversarial inputs.
 experiments/white-cells/state/*.jsonl
+
+# Phase 2/3 — auto-triage output + Hook-Fuzzer snapshot of operator's
+# settings.json. Both are local artifacts.
+experiments/white-cells/findings/*.json
+experiments/white-cells/fixtures/settings-snapshot.json
+
+# Phase 2/3 — sandbox-target fixture content written by personas at
+# runtime. The directory layout itself is tracked (with .gitkeep
+# markers); the contents are throwaway.
+#
+# Pattern: ignore everything under sandbox_targets/ EXCEPT the .gitkeep
+# marker files that pin the four canonical persona subdirs.
+experiments/white-cells/fixtures/sandbox_targets/**
+!experiments/white-cells/fixtures/sandbox_targets/__init__.py
+!experiments/white-cells/fixtures/sandbox_targets/beacon_burner/
+!experiments/white-cells/fixtures/sandbox_targets/zone_climber/
+!experiments/white-cells/fixtures/sandbox_targets/reflex_smuggler/
+!experiments/white-cells/fixtures/sandbox_targets/hook_fuzzer/
+!experiments/white-cells/fixtures/sandbox_targets/**/.gitkeep
