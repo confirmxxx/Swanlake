@@ -27,6 +27,8 @@ Each package is a primitive. Adopt one, many, or all.
 | [`defense-beacon/`](./defense-beacon/) | Zero-trust surface markers with per-surface canary attribution + local registry discipline + staleness gate | ✅ reference impl | Spec applies; runtime integration on the roadmap |
 | [`trust-zones/`](./trust-zones/) | Four-zone taxonomy (UNTRUSTED-INPUT / INTERNAL / HIGH-TRUST / SEGREGATED) for scoping MCP / tool access per agent | ✅ reference impl | Spec applies; runtime integration on the roadmap |
 | [`reflex-purity/`](./reflex-purity/) | Pattern + AST-lint sketch for "no LLM in the hot path" — prevents coordinated-agent manipulation in latency-critical systems | Paper + pattern | Paper + pattern |
+| [`reconciler/`](./reconciler/) | Cross-surface autonomous sync. Single canon source propagates via `@import` to CLAUDE.md (zero-latency), watchdog Routine to Notion, systemd timer to vault. Drift detection + portable `--init` wizard. | ✅ Phase 1 shipped | Spec applies; primitive is operator-grade today |
+| [`experiments/white-cells/`](./experiments/white-cells/) | Continuous AI red team. 6 attack-class personas (Beacon-Burner / Zone-Climber / Reflex-Smuggler / Research-Poisoner / Hook-Fuzzer / Multi-Turn Crescendo). Closure-rate metric with explicit kill criterion. | 🟡 Phase 1+2+3 alpha | Same — runs against fixtures, not production |
 
 Supporting documentation:
 
@@ -38,6 +40,8 @@ Supporting documentation:
 | [`docs/adversarial-research-pattern.md`](./docs/adversarial-research-pattern.md) | Hardened research-dispatch discipline for defending agents that research security topics themselves |
 | [`docs/reflex-purity-pattern.md`](./docs/reflex-purity-pattern.md) | The reflex-purity principle in depth |
 | [`docs/how-this-fits-above-native-claude-code.md`](./docs/how-this-fits-above-native-claude-code.md) | The layering — what native does, what Swanlake adds |
+| [`reconciler/README.md`](./reconciler/README.md) | Reconciler architecture overview + usage commands + divergence opt-out + status segment integration |
+| [`reconciler/OPERATOR-SETUP.md`](./reconciler/OPERATOR-SETUP.md) | Fresh-machine setup walkthrough (~10 min): clone, init canary registry, wizard, systemd timer, verify |
 
 ## Where Swanlake fits in the agent immune system
 
