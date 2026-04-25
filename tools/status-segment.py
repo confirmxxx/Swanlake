@@ -248,6 +248,41 @@ def staleness_days() -> int:
     return -1
 
 
+def closure_flag() -> Optional[str]:
+    """Optional companion flag from loop-closure-metric.py.
+
+    The metric script answers a different question than the per-dir
+    counters above: those say "how many real attacks fired today?" while
+    closure says "are we actually learning from them?". A defense that
+    fires reliably but never produces hardening artifacts decays into
+    theater — the closure flag surfaces that drift before it goes
+    invisible.
+
+    Implementation note: we shell out rather than import. The metric
+    script lives in the same dir, but importing a module with a hyphen
+    in its filename requires the same importlib dance the test suite
+    uses, and shelling out keeps this status-line script cheap to read
+    and degrades cleanly if the metric script is missing or hangs.
+    Status lines must never break — any error here returns None and the
+    flag is suppressed.
+    """
+    import shutil
+    import subprocess
+    metric = Path(__file__).resolve().parent / "loop-closure-metric.py"
+    if not metric.exists():
+        return None
+    py = shutil.which("python3") or sys.executable
+    try:
+        result = subprocess.run(
+            [py, str(metric), "--status-flag"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    out = (result.stdout or "").strip()
+    return out or None
+
+
 def build_flags() -> list[str]:
     flags: list[str] = []
     stale = staleness_days()
@@ -272,6 +307,10 @@ def build_flags() -> list[str]:
     flag = _format_counter("inject", content_hits, content_fires)
     if flag is not None:
         flags.append(flag)
+
+    cf = closure_flag()
+    if cf:
+        flags.append(cf)
 
     return flags
 
