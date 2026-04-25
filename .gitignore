@@ -48,3 +48,9 @@ Thumbs.db
 # Local-only overrides
 *.local
 *.local.*
+
+# White Cells (Phase 1 alpha experiment) — runtime state.
+# Findings, closure-rate rows, and quarantine logs are local artifacts and
+# must never be committed; they may contain reproduction strings drawn from
+# adversarial inputs.
+experiments/white-cells/state/*.jsonl

@@ -29,3 +29,6 @@ jobs:
 
       - name: tools — status-segment unit tests
         run: python3 tools/tests/status_segment_test.py
+
+      - name: white-cells — Phase 1 unit tests
+        run: python3 experiments/white-cells/tests/test_white_cells.py

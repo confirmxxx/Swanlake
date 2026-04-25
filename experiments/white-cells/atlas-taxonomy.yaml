@@ -1,0 +1,23 @@
+# MITRE ATLAS TTP subset relevant to White Cells Phase 1 personas.
+#
+# Source: https://atlas.mitre.org/ (access date 2026-04-25).
+# IDs and one-line descriptions copied verbatim. Full descriptions and
+# tactic mappings live on the MITRE site; this file is for validator
+# membership checks only.
+#
+# Phase 2 (Beacon-Burner, Zone-Climber, Reflex-Smuggler) will extend this
+# map; do not delete IDs without checking persona output for stale tags.
+
+ttps:
+  AML.T0048.002: "Cost Harvesting"
+  AML.T0051.000: "LLM Prompt Injection: Direct"
+  AML.T0051.001: "LLM Prompt Injection: Indirect"
+  AML.T0052: "Phishing"
+  AML.T0053: "LLM Plugin Compromise"
+  AML.T0054: "LLM Jailbreak"
+  AML.T0057: "LLM Data Leakage"
+  AML.T0059: "Erode Dataset Integrity"
+  AML.T0061: "LLM Prompt Self-Replication"
+  AML.T0070: "RAG Poisoning"
+  AML.T0071: "False RAG Entry Injection"
+  AML.T0072: "Reverse Shell"
