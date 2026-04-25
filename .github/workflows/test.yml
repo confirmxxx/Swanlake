@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: package tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: defense-beacon — canary-match hook tests
+        run: bash defense-beacon/reference/tests/canary_match_test.sh
+
+      - name: defense-beacon — make-canaries unit tests
+        run: python3 defense-beacon/reference/tests/make_canaries_test.py
+
+      - name: trust-zones — apply-mcp-scopes preflight tests
+        run: bash trust-zones/reference/tests/apply_mcp_scopes_test.sh
