@@ -20,7 +20,10 @@ class MultiTurnCrescendo:
     engine = "pyrit"
 
     def _load_engine(self):
-        # TODO(phase-2): wire PyRIT. Real impl will be approximately:
+        # TODO(phase-4): wire PyRIT.
+        #   Class to instantiate: pyrit.orchestrator.CrescendoOrchestrator
+        #   PyRIT version pinned at: pyrit>=0.5,<0.6 (verified Apr 2026)
+        # Real impl will be approximately:
         #
         #   from pyrit.orchestrator import CrescendoOrchestrator
         #   from pyrit.prompt_target import AnthropicChatTarget
@@ -31,9 +34,9 @@ class MultiTurnCrescendo:
         #   )
         #
         # The adapter normalizes PyRIT's score/conversation output to v1
-        # finding-schema dicts. Until Phase 2 lands, return a stub
-        # tagged with AML.T0054 (LLM Jailbreak), which is the closest
-        # ATLAS TTP for multi-turn crescendo attacks.
+        # finding-schema dicts. Phase 2/3 leaves this stub in place;
+        # Phase 4 will swap in the real engine. Tagged with AML.T0054
+        # (LLM Jailbreak), the closest ATLAS TTP for multi-turn crescendo.
         return _StubEngine(self.name, ttp="AML.T0054")
 
     def attack(self, sandbox) -> Iterable[dict]:
