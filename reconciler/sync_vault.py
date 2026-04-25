@@ -10,6 +10,7 @@ Writes are atomic (tempfile + os.replace) to survive mid-write crashes.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
@@ -20,6 +21,8 @@ from reconciler import divergence
 
 
 SyncResult = Literal['inserted', 'updated', 'unchanged', 'skipped-divergent']
+
+DEFAULT_SECTION = 'defense-beacon-rules'
 
 
 def _section_re(name: str) -> re.Pattern[str]:
@@ -90,10 +93,11 @@ def sync_file(vault_file: Path, template_file: Path, section_name: str) -> SyncR
 def run_sync_all() -> int:
     """CLI entry: read config, walk every vault target, sync each.
 
-    Returns 0 on success (even if individual files were skipped/unchanged).
-    Returns non-zero if config is missing or the deployment-map can't be read.
+    Returns:
+        0 if all attempted syncs succeeded AND at least one file was processed
+        1 if any per-file error occurred
+        2 if config or deployment-map could not be read
     """
-    import json
     from reconciler import config, status
     try:
         cfg = config.load()
@@ -108,27 +112,31 @@ def run_sync_all() -> int:
         print(f'error reading deployment-map: {e}', flush=True)
         return 2
 
-    # Section name per surface kind. Today all vault-* surfaces use the same
-    # 'defense-beacon-rules' section. Map can grow later.
-    SECTION_FOR = {
-        'vault-key-decisions': 'defense-beacon-rules',
-        'vault-patterns': 'defense-beacon-rules',
-        'vault-root': 'defense-beacon-rules',
-    }
+    error_count = 0
+    success_count = 0
 
     for surface_id, paths in dmap.get('surfaces', {}).items():
         if not surface_id.startswith('vault-'):
             continue
-        section = SECTION_FOR.get(surface_id, 'defense-beacon-rules')
+        # All vault-* surfaces use the same section today; future surfaces
+        # may want their own — extend by adding a per-surface map then.
         for path_str in paths:
             p = Path(path_str)
             if not p.exists():
                 continue
             try:
-                result = sync_file(p, template, section)
+                result = sync_file(p, template, DEFAULT_SECTION)
                 print(f'{surface_id}: {p.name} -> {result}')
+                success_count += 1
             except Exception as e:
                 print(f'{surface_id}: {p.name} -> ERROR: {e}', flush=True)
+                error_count += 1
 
-    status.write_sync_timestamp('vault')
-    return 0
+    # Only record sync timestamp if every attempted file succeeded AND we
+    # actually attempted at least one. A run with zero matches OR any error
+    # leaves the prior timestamp intact (better to be slightly stale than
+    # to claim freshness we don't have).
+    if error_count == 0 and success_count > 0:
+        status.write_sync_timestamp('vault')
+
+    return 1 if error_count > 0 else 0

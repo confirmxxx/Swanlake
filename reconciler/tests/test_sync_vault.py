@@ -1,4 +1,5 @@
 """Tests for the vault sync engine."""
+import json
 import sys
 import tempfile
 import unittest
@@ -85,6 +86,101 @@ class SectionSyncTest(unittest.TestCase):
         self.assertIn('<!-- swanlake-section-start: rules -->', out)
         self.assertIn('<!-- swanlake-section-end: rules -->', out)
         self.assertIn('NEW', out)
+
+
+class RunSyncAllErrorHandlingTest(unittest.TestCase):
+    """Verify run_sync_all() return codes + timestamp-on-success behavior."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self._tmpdir.name)
+        self.canon_dir = self.tmpdir / 'canon'
+        self.canon_dir.mkdir()
+        self.template = self.canon_dir / 'vault-template.md'
+        self.template.write_text(
+            '<!-- swanlake-section-start: defense-beacon-rules -->\n'
+            'RULES\n'
+            '<!-- swanlake-section-end: defense-beacon-rules -->\n'
+        )
+        self.dmap = self.tmpdir / 'dmap.json'
+        self.state = self.tmpdir / 'last-sync.json'
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _config_patch(self):
+        """Build a Config object pointing at the per-test paths."""
+        from reconciler.config import Config
+        return Config(
+            deployment_map_path=self.dmap,
+            vault_root=self.tmpdir,
+            notion_master_page_id='unused',
+            notion_posture_page_id='unused',
+            swanlake_repo_path=self.tmpdir,
+            canon_dir=self.canon_dir,
+        )
+
+    def _run_with_dmap(self, dmap_content: dict) -> tuple[int, bool]:
+        """Helper: write dmap, run sync_all under patched config + status write,
+        return (exit_code, timestamp_was_written).
+
+        Patches write_sync_timestamp directly (rather than STATE_PATH) because
+        write_sync_timestamp captures STATE_PATH as a default arg at def-time,
+        so monkeypatching the module attribute would be a no-op AND would
+        pollute the operator's real state file.
+        """
+        from unittest.mock import patch
+        self.dmap.write_text(json.dumps(dmap_content))
+        cfg = self._config_patch()
+        state = self.state
+
+        def fake_write(surface, when=None):
+            state.write_text(f'{{"{surface}": "stamped"}}')
+
+        with patch('reconciler.config.load', return_value=cfg):
+            with patch('reconciler.status.write_sync_timestamp',
+                       side_effect=fake_write):
+                rc = sync_vault.run_sync_all()
+        return rc, self.state.exists()
+
+    def test_returns_zero_on_clean_sync(self):
+        vault_file = self.tmpdir / 'note.md'
+        vault_file.write_text('body')
+        rc, written = self._run_with_dmap({
+            'surfaces': {'vault-root': [str(vault_file)]}
+        })
+        self.assertEqual(rc, 0)
+        self.assertTrue(written)
+
+    def test_returns_one_on_per_file_error(self):
+        # Point at a directory instead of a file to force sync_file to error.
+        bad = self.tmpdir / 'is-a-dir'
+        bad.mkdir()
+        rc, written = self._run_with_dmap({
+            'surfaces': {'vault-root': [str(bad)]}
+        })
+        self.assertEqual(rc, 1)
+        self.assertFalse(written)  # timestamp NOT written on any error
+
+    def test_no_timestamp_when_zero_files_processed(self):
+        rc, written = self._run_with_dmap({'surfaces': {}})
+        self.assertEqual(rc, 0)
+        self.assertFalse(written)  # timestamp NOT written when nothing to do
+
+    def test_returns_two_on_missing_config(self):
+        from unittest.mock import patch
+        from reconciler.config import ConfigMissing
+        with patch('reconciler.config.load', side_effect=ConfigMissing('test')):
+            rc = sync_vault.run_sync_all()
+        self.assertEqual(rc, 2)
+
+    def test_returns_two_on_unreadable_dmap(self):
+        from unittest.mock import patch
+        cfg = self._config_patch()
+        # Don't write the dmap file — read will fail.
+        with patch('reconciler.config.load', return_value=cfg):
+            rc = sync_vault.run_sync_all()
+        self.assertEqual(rc, 2)
 
 
 if __name__ == '__main__':
