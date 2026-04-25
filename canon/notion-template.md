@@ -89,4 +89,40 @@ Neither alone is sufficient. AGT stops a compromised agent from executing a bad 
 
 ---
 
+# Roadmap — what's next
+
+## Near-term (queued, full design specs in vault)
+
+- **White Cells full activation** — Phase 1+2+3 alpha is shipped. Full activation = wire the supervising Claude Routine + dedicated unprivileged Linux user + nftables egress allowlist + scheduled weekly persona swarm runs against a fixture sandbox. Queued behind passive triggers (see below).
+- **Reconciler Phase 2 — Backend abstraction** — make Reconciler stack-agnostic. One Backend protocol, N swappable implementations: Notion / Obsidian / SQLite RAG / Pinecone / Confluence / GitHub wiki / plain markdown dir. Queued behind a real second-backend need.
+- **Continuous-Eval CI** — wire promptfoo + PyRIT + Garak into CI with a regression budget. Every PR auto-proven against published attack corpora; merge fails if detection drops past tolerance. Queued behind ≥30 days of loop-closure baseline data.
+
+## Trigger conditions (any one pulls a queued item forward)
+
+- ≥1 third-party adopting Swanlake in production (track GH stars / forks / issues)
+- External user reports a defense regression
+- A sibling project under the same operator umbrella needs a non-Notion backend
+- Loop-closure metric accumulates ≥30 days of clean data → real baseline for regression budget
+- A specific Swanlake primitive needs a feature one of the queued items already proved out
+
+## Out of scope (deliberately)
+
+- **Output-path policy enforcement.** Use [Microsoft AGT](https://github.com/microsoft/agent-governance-toolkit) or equivalent. Swanlake covers the input path only — see "Where Swanlake fits in the agent immune system" above.
+- **Per-tenant multi-customer scaling.** Single-operator design today; multi-tenant is a different architectural pattern.
+- **Replacing native Claude Code platform features.** Swanlake layers ABOVE the native sandbox / OAuth scoping / model-layer RL — does not replace them.
+- **Cloud-hosted SaaS.** Operator-installed only; secrets stay local.
+
+## Honest gaps (publicly tracked)
+
+- **One-maintainer artifact at v0.1.0.** Bus factor of 1. Contributor flow has the discipline baked in (pre-publish scans, signed commits, DCO) but no second human reviewer yet.
+- **Notion sync attestation gap.** The watchdog Routine writes Notion in the cloud; the local status engine can't directly attest those writes. Future: Notion-side `modified_at` polling.
+- **White Cells personas are scaffolds.** Phase 2/3 shipped real personas + auto-triage, but the attack-library payloads are stubs; full DeepTeam / PyRIT / promptfoo integration is post-trigger.
+- **No external integrations or community CI yet.** Awesome-list discovery PR pending merge externally.
+
+## Loop-closure metric (the meta-defense)
+
+Every proposed change is measured: did it produce a real hardening artifact within 14 days? 7-day rolling ratio currently 0.70 — well above the 30% theatre threshold and above the 50% legit threshold. Kill criterion: if the ratio drops below 30% for 4 weeks, the project (or the relevant primitive) is retired.
+
+---
+
 *Maintained by Tristar AGS. Auto-propagated from `canon/notion-template.md` via the security-watchdog Routine.*
