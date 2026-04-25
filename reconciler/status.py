@@ -2,61 +2,89 @@
 
 Reads ~/.config/swanlake-reconciler/last-sync.json (per-surface ISO
 timestamps written by sync engines). Classifies each surface by age
-vs current time:
-  fresh     — synced within 24h
-  drift     — synced 24h to 7d ago (status segment shows yellow)
-  drift-red — synced > 7d ago (status segment shows red)
-  missing   — no sync timestamp recorded
-Plus an `overall` field aggregated from per-surface (worst wins).
+vs current time. Severity ordering: fresh < drift < missing < drift-red.
+`missing` is worse than `drift` (never synced is more concerning than
+stale-but-known); `drift-red` (stale > 7d) is worst.
 """
 from __future__ import annotations
 
+import fcntl
 import json
-import sys
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Default state path; overridable in tests.
+# Default state path; overridable via state_path arg in tests.
 STATE_PATH = Path.home() / '.config' / 'swanlake-reconciler' / 'last-sync.json'
 
 SURFACES = ('claude_md', 'notion', 'vault')
+
+# Window thresholds — tune here, single source of truth.
+FRESH_WINDOW = timedelta(hours=24)
+DRIFT_WINDOW = timedelta(days=7)
+
+# Severity ordering (higher = worse). `missing` beats `drift` because never
+# synced is structurally more concerning than stale-but-recorded.
+_SEVERITY = {
+    'fresh': 0,
+    'drift': 1,
+    'missing': 2,
+    'drift-red': 3,
+}
 
 
 def _classify(synced_at: datetime | None, now: datetime) -> str:
     if synced_at is None:
         return 'missing'
     age = now - synced_at
-    if age < timedelta(hours=24):
+    if age < FRESH_WINDOW:
         return 'fresh'
-    if age < timedelta(days=7):
+    if age < DRIFT_WINDOW:
         return 'drift'
     return 'drift-red'
+
+
+def _read_state(state_path: Path) -> dict:
+    """Read sync-state JSON. Any failure → empty dict (treat as all-missing)."""
+    try:
+        return json.loads(state_path.read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    """Parse ISO timestamp; treat unparseable as missing."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def compute_report(state_path: Path = STATE_PATH) -> dict:
     """Return {'surfaces': {name: {'status', 'last_sync_utc', 'age_hours'}}, 'overall': str}."""
     now = datetime.now(timezone.utc)
-    try:
-        raw = json.loads(state_path.read_text())
-    except FileNotFoundError:
-        raw = {}
+    raw = _read_state(state_path)
     surfaces: dict[str, dict] = {}
     for s in SURFACES:
-        ts_str = raw.get(s)
-        synced = datetime.fromisoformat(ts_str) if ts_str else None
+        synced = _parse_timestamp(raw.get(s))
         st = _classify(synced, now)
         surfaces[s] = {
             'status': st,
             'last_sync_utc': synced.isoformat() if synced else None,
             'age_hours': (now - synced).total_seconds() / 3600 if synced else None,
         }
-    severity = {'fresh': 0, 'drift': 1, 'drift-red': 2, 'missing': 1}
-    overall = max((surfaces[s]['status'] for s in SURFACES), key=lambda x: severity[x])
+    overall = max(
+        (surfaces[s]['status'] for s in SURFACES),
+        key=lambda x: _SEVERITY[x],
+    )
     return {'surfaces': surfaces, 'overall': overall}
 
 
 def run_status() -> int:
-    """CLI entry: print human-readable report, exit 0 if fresh, 1 if drift, 2 if red."""
+    """CLI entry: print human-readable report. Exit 0=fresh, 1=drift, 2=missing/drift-red."""
     report = compute_report()
     print(f"swanlake-reconciler status — overall: {report['overall']}")
     print(f"{'surface':<12} {'status':<12} {'last sync (UTC)':<32} {'age':<8}")
@@ -65,17 +93,45 @@ def run_status() -> int:
         last = d['last_sync_utc'] or '-'
         age = f'{d["age_hours"]:.1f}h' if d['age_hours'] is not None else '-'
         print(f'{s:<12} {d["status"]:<12} {last:<32} {age:<8}')
-    return {'fresh': 0, 'drift': 1, 'missing': 1, 'drift-red': 2}[report['overall']]
+    return {'fresh': 0, 'drift': 1, 'missing': 2, 'drift-red': 2}[report['overall']]
 
 
 def write_sync_timestamp(surface: str, when: datetime | None = None,
                          state_path: Path = STATE_PATH) -> None:
-    """Called by sync engines to record a successful sync."""
+    """Atomically record a successful sync.
+
+    Concurrency-safe: holds fcntl.flock on a sidecar lockfile during the
+    read-modify-write. Crash-safe: writes to a temp file in the same
+    directory then os.replace() (atomic on POSIX).
+    """
     when = when or datetime.now(timezone.utc)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        raw = json.loads(state_path.read_text())
-    except FileNotFoundError:
-        raw = {}
-    raw[surface] = when.isoformat()
-    state_path.write_text(json.dumps(raw, indent=2))
+    lock_path = state_path.with_suffix(state_path.suffix + '.lock')
+
+    # fcntl.flock requires an open fd. Use the lock file separately so the
+    # state file write can use os.replace() atomically.
+    with open(lock_path, 'w') as lock_fp:
+        fcntl.flock(lock_fp.fileno(), fcntl.LOCK_EX)
+        try:
+            raw = _read_state(state_path)
+            raw[surface] = when.isoformat()
+            # Write to temp file in the same dir, then atomic rename.
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                prefix=state_path.name + '.',
+                suffix='.tmp',
+                dir=str(state_path.parent),
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w') as f:
+                    json.dump(raw, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, state_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fp.fileno(), fcntl.LOCK_UN)
