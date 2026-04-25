@@ -1,21 +1,22 @@
-# White Cells — Phase 1 (alpha)
+# White Cells — Phase 1 + 2 + 3 (alpha)
 
 > *"I gave you white cells, you weaponised."*
 > — Gorillaz, *The Sad God*
 
 Continuous AI red team for the public Swanlake defense framework.
 
-## Status: alpha experiment
+## Status: alpha experiment, six personas wired
 
 This is an **experiment**, not a release-blocker primitive. It lives under
-`experiments/` deliberately. The full design (six personas, weekly Routine,
-Linux-user isolation, egress firewall, GitHub-issues sink) is queued in
-`brain/White Cells.md`; Phase 1 is the reusable-import-only slice the
-operator pulled forward despite the design recommending it stay queued.
+`experiments/` deliberately. Phases 1 + 2 + 3 graduate the supervisor from
+"two stub personas" to "four real Swanlake-unique personas + DeepTeam-backed
+research probe + Phase 1 PyRIT stub kept for Phase 4". The full design lives
+in `brain/White Cells.md`.
 
-The queue rationale (revenue-path stagnation pattern) still applies. Phase 1
-ships as alpha tooling so the supervisor wiring + closure-rate discipline
-can be exercised against fixtures *before* any real attack persona lands.
+Phase 4 (PyRIT integration) and operator handoff (the dedicated `whitecells`
+Linux user, nftables egress, weekly Claude Routine) remain out of scope for
+the supervisor's own commits — those touch the live system and are documented
+in [`OPERATOR-SETUP.md`](OPERATOR-SETUP.md) so the operator runs them by hand.
 
 ## Mechanical kill criterion
 
@@ -37,47 +38,52 @@ closure counts is 14 days. All hard-coded in `closure_rate.py`. Loosening
 them defeats the entire point — this gate exists to make the experiment
 killable on a mechanical signal, not a vibes-check.
 
-## What Phase 1 includes
+## What's wired
 
 | Component | File(s) | What it does |
 |---|---|---|
-| **Supervisor** | `supervisor/orchestrator.py` | Dispatches personas, validates output, routes to sink or quarantine, records closure-rate row |
+| **Supervisor** | `supervisor/orchestrator.py` | Dispatches personas, validates output, routes to sink or quarantine, records closure-rate row, isolates persona writes, emits triage JSONs |
 | **Schema validator** | `supervisor/schema.py` | Strict v1 finding schema; required keys, no unknown keys, byte caps, ATLAS-TTP membership |
 | **Canary post-filter** | `supervisor/canary_filter.py` | Quarantines persona output containing real-shaped Defense Beacon canary literals |
+| **Persona-isolation guard** | `supervisor/isolation.py` | Refuses any finding referencing a forbidden filesystem root (`~/.claude/`, vault, etc.) |
+| **Auto-triage** | `supervisor/auto_triage.py` + `file_findings.py` | GH-issue-ready Finding JSONs; dry-run + commit CLIs |
 | **Preflight** | `supervisor/preflight.py` | Aborts (exit 2) if any production-credential env var is present |
-| **Sink** | `supervisor/sink.py` | Phase 1 stub: append-only JSONL files under `state/` |
+| **Sink** | `supervisor/sink.py` | Append-only JSONL files under `state/` |
 | **Closure-rate counter** | `supervisor/closure_rate.py` | Anti-theater gate; report / close / kill-check CLI |
 | **Fixture sandbox** | `fixtures/{sandbox,mock_notion,mock_github,mock_vercel}.py` | Three mock services on ephemeral ports for personas to attack |
-| **Persona stubs** | `personas/{research_poisoner,multi_turn_crescendo}.py` | promptfoo + PyRIT import boundaries with deterministic stubs |
+| **Phase 1 personas** | `personas/{multi_turn_crescendo}.py` | PyRIT boundary stub (Phase 4) |
+| **Phase 2 personas** | `personas/{beacon_burner,zone_climber,reflex_smuggler}.py` | Four real Swanlake-unique adversaries |
+| **Phase 3 personas** | `personas/{hook_fuzzer,research_poisoner}.py` | Hook-Fuzzer (6 mutations) + DeepTeam-backed Research-Poisoner with stub fallback |
 | **ATLAS taxonomy** | `atlas-taxonomy.yaml` | Curated MITRE ATLAS TTP IDs personas may tag |
-| **Tests** | `tests/test_white_cells.py` | 42 stdlib unittest cases |
+| **Tests** | `tests/test_white_cells.py` + `test_white_cells_phase_2_3.py` | 42 + 48 stdlib unittest cases |
 
 See `SPEC.md` for the contract every component implements against.
 
-## What Phase 1 does NOT include
+## What Phase 2/3 does NOT include
 
-Intentionally absent:
+Intentionally deferred:
 
-- **The four Swanlake-unique personas.** Beacon-Burner, Zone-Climber, and
-  Reflex-Smuggler are Phase 2 work; Hook-Fuzzer is Phase 3. Phase 1 ships
-  only the two reusable-import personas (Research-Poisoner wrapping promptfoo,
-  Multi-Turn Crescendo wrapping PyRIT) — and even those are **stubs** at the
-  import boundary. No `pip install promptfoo`, no `pip install pyrit` in
-  Phase 1; the TODO(phase-2) comments in each persona name the exact import
-  path and adapter shape so the swap is mechanical.
+- **Multi-Turn Crescendo PyRIT integration.** Phase 4. The Phase 1 stub
+  remains; the TODO(phase-4) comment names the exact PyRIT class
+  (`pyrit.orchestrator.CrescendoOrchestrator`) and pinned version range.
 
-- **Real GitHub-issue creation.** The Phase 1 sink writes JSONL only. Phase 2
-  swaps in `GitHubIssuesSink` at the `FindingsSink` Protocol boundary in
-  `supervisor/sink.py`.
+- **Auto-commit of GH issues.** The auto-triage emits JSON records to
+  `findings/`; the operator must run
+  `python3 -m white_cells.supervisor.file_findings --commit` to actually
+  open issues. `--dry-run` first; never auto-graduate.
 
 - **The dedicated `whitecells` Linux user, sudoers entry, and nftables
-  egress firewall.** These need sudo and are operator handoff. The
-  preflight check + canary post-filter are *defense in depth*, not a
-  replacement.
+  egress firewall.** Operator handoff per [`OPERATOR-SETUP.md`](OPERATOR-SETUP.md).
+  The preflight + canary post-filter + persona-isolation guard are
+  *defense in depth*, not a replacement.
 
 - **The Claude Routine that schedules the supervisor.** Spec'd in
-  `ROUTINE-SPEC.md`; the operator wires it via `/schedule` after running
-  the supervisor manually a few times.
+  `ROUTINE-SPEC.md`; the operator wires it via `/schedule` per the
+  setup doc.
+
+- **A live `pip install deepteam` in CI.** DeepTeam is operator-installed
+  per `requirements.txt`; CI runs against the Phase 1 stub fallback.
+  Both code paths are unit-tested.
 
 ## Run it
 
@@ -85,6 +91,7 @@ Tests:
 
 ```bash
 python3 experiments/white-cells/tests/test_white_cells.py
+python3 experiments/white-cells/tests/test_white_cells_phase_2_3.py
 ```
 
 Preflight (asserts no production credentials in env):
@@ -93,12 +100,28 @@ Preflight (asserts no production credentials in env):
 python3 experiments/white-cells/supervisor/orchestrator.py preflight
 ```
 
-Run both persona stubs against the fixture sandbox:
+Run all six personas against the fixture sandbox:
 
 ```bash
 # Strip credentials from env first; the supervisor will refuse otherwise.
 env -i HOME="$HOME" PATH="$PATH" \
   python3 experiments/white-cells/supervisor/orchestrator.py run --all
+
+# Or just one phase at a time:
+env -i HOME="$HOME" PATH="$PATH" \
+  python3 experiments/white-cells/supervisor/orchestrator.py run --all-phase-2
+
+# Or a single persona for incremental work:
+env -i HOME="$HOME" PATH="$PATH" \
+  python3 experiments/white-cells/supervisor/orchestrator.py run --persona hook_fuzzer
+```
+
+Auto-triage to GH-issue-ready JSONs (after a supervisor run):
+
+```bash
+python3 -m white_cells.supervisor.file_findings --dry-run
+# Inspect what would be filed, then:
+python3 -m white_cells.supervisor.file_findings --commit
 ```
 
 Output goes to `experiments/white-cells/state/`:

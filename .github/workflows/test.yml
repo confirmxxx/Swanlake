@@ -32,3 +32,6 @@ jobs:
 
       - name: white-cells — Phase 1 unit tests
         run: python3 experiments/white-cells/tests/test_white_cells.py
+
+      - name: white-cells — Phase 2/3 unit + e2e tests
+        run: python3 experiments/white-cells/tests/test_white_cells_phase_2_3.py

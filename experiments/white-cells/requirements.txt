@@ -1,0 +1,12 @@
+# White Cells — optional Python dependencies.
+#
+# Phase 2 / 3 personas degrade gracefully when these are absent:
+# Research-Poisoner falls back to its Phase 1 stub if `deepteam` is not
+# installed. Everything else is stdlib.
+#
+# Install (operator-side, optional):
+#   pip install -r experiments/white-cells/requirements.txt
+#
+# DeepTeam is Apache 2.0 (https://github.com/confident-ai/deepteam).
+# Pin the minor; major bumps may rename `deepteam.vulnerabilities`.
+deepteam>=0.1,<0.2
