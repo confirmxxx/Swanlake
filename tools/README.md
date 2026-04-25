@@ -139,9 +139,9 @@ Think of it as a smoke detector for your agent stack. You glance at your termina
 | `🛡?` | ⚪ gray | No watchdog has fired yet | Fire the routine once to initialize, OR install the systemd timer, OR `date -u +%Y-%m-%dT%H:%M:%SZ > ~/.claude/.last-watchdog-run` |
 | `🛡stale:3d` | 🟡 yellow | Threat posture 2–6 days old | No rush — watchdog will refresh on next scheduled run. Manual fire if you're paranoid. |
 | `🛡!stale:9d` | 🔴 red | Posture ≥7 days old — **staleness gate is active** | Fire the routine now. Until you do, Claude Code will refuse new MCP installs / new OAuth scopes / new plugin loads (beacon rule A11). |
-| `🛡canary:1` | 🔴 red | A canary tripwire matched a tool output today | Open `~/.claude/canary-hits/$(date -u +%Y-%m-%d).jsonl`. Was it you running `verify-beacons.py`? Benign. Otherwise investigate which surface leaked. |
-| `🛡exfil:2` | 🔴 red | Secret-shape payloads flagged by the exfil-monitor hook today | Open `~/.claude/exfil-alerts/…`. Check whether the shape was a false positive (e.g. a legit hex string in your test fixture) or something actually trying to leave. |
-| `🛡inject:1` | 🔴 red | Prompt-injection markers in fetched content today | Open `~/.claude/content-safety/…`. Usually a scraped page tried to speak in imperatives. |
+| `🛡canary:1` | 🔴 red | A canary tripwire matched a tool output today (real `hits` array, not just a probe) | Open `~/.claude/canary-hits/$(date -u +%Y-%m-%d).jsonl`. Was it you running `verify-beacons.py`? Benign. Otherwise investigate which surface leaked. |
+| `🛡exfil:2` | 🔴 red | Secret-shape payloads flagged by the exfil-monitor hook today at `block` or `warn` severity (`info`-level lines are excluded) | Open `~/.claude/exfil-alerts/…`. Check whether the shape was a false positive (e.g. a legit hex string in your test fixture) or something actually trying to leave. |
+| `🛡inject:1` | 🔴 red | Prompt-injection actually flagged in fetched content today (`block: true`, `score > 0`, or non-empty `findings`) — not just a hook fire | Open `~/.claude/content-safety/…`. Usually a scraped page tried to speak in imperatives. |
 | `🛡!stale:8d,canary:1` | 🔴 red | Multiple issues stacked | Triage in order: newest alert first, staleness second (it's informational once you know). |
 
 ### Decision flow — "I see X, what now?"
@@ -208,10 +208,11 @@ Script exits 0 silently and falls back to `🛡?`. Never breaks your status line
 | `🛡?` | No last-run timestamp yet (wire up the routine or manual-fire step) |
 | `🛡stale:Nd` | Posture stale, yellow band (default: 2–6 days) |
 | `🛡!stale:Nd` | Posture stale, red band (default: ≥7 days) |
-| `🛡canary:N` | N canary-match hits today |
-| `🛡exfil:N` | N exfil-monitor hits today |
-| `🛡inject:N` | N content-safety hits today |
+| `🛡canary:N` | N canary-match real hits today (lines with a non-empty `hits` array) |
+| `🛡exfil:N` | N exfil-monitor real hits today (`severity` of `block` or `warn`) |
+| `🛡inject:N` | N content-safety real hits today (`block: true`, `score > 0`, or findings present) |
 | `🛡!stale:8d,canary:1` | Combined — issues listed comma-separated |
+| `🛡canary:0/2,exfil:0/0,inject:0/40` | `SWANLAKE_STATUS_VERBOSITY=full` mode — `label:hits/fires`. Always rendered, even when clean. Use it to verify the hooks are actually firing without polluting the default glyph. |
 
 ### Configuration (all env vars optional)
 
@@ -225,6 +226,7 @@ Script exits 0 silently and falls back to `🛡?`. Never breaks your status line
 | `SWANLAKE_STALE_YELLOW` | `2` | Days of staleness triggering yellow band |
 | `SWANLAKE_STALE_RED` | `7` | Days triggering red band + `!stale` prefix |
 | `SWANLAKE_STATUS_STYLE` | `default` | `silent` suppresses output when posture is clean |
+| `SWANLAKE_STATUS_VERBOSITY` | `default` | `full` renders each per-dir counter as `label:hits/fires` even at zero. Useful for verifying the hooks are wired correctly when the default mode is intentionally quiet. |
 
 ### Integrations
 
@@ -272,10 +274,24 @@ Python 3.10+ stdlib only. No `pip install` required.
 
 Single stat + at-most-three small file reads per call. Typical wall-clock < 10ms. Safe to invoke on every status-line refresh.
 
+### Counting semantics
+
+Each per-dir counter reports **real detections, not hook-fire volume**. A clean day produces zero flags even when the underlying hook fired hundreds of times — for example, `content-safety` inspects every `WebFetch`, so a normal session emits dozens of clean-fire log lines that are intentionally not surfaced.
+
+Per-dir hit predicates:
+
+| Dir | Schema field that signals a real hit |
+|---|---|
+| `~/.claude/canary-hits` | non-empty `hits: [...]` array |
+| `~/.claude/exfil-alerts` | `severity in {"block", "warn"}` |
+| `~/.claude/content-safety` | `block: true` OR `score > 0` OR non-empty `findings` |
+
+Set `SWANLAKE_STATUS_VERBOSITY=full` to render `label:hits/fires` and see both numbers — useful when you want to confirm the hook is actually firing.
+
 ### Limitations
 
 - Reads only today's log files (by local UTC date). Alerts from yesterday still-pending-triage don't appear. By design — status should reflect current state.
-- Does not aggregate by severity. An `exfil:1` from a false positive and an `exfil:1` from a real secret-shape look identical. Triage via `~/.claude/exfil-alerts/` or the `sec-dash` command that reads the same logs.
+- Does not aggregate by severity within the "real hit" set. An `exfil:1` from a false-positive `warn` and an `exfil:1` from a real `block` look identical. Triage via `~/.claude/exfil-alerts/` or the `sec-dash` command that reads the same logs.
 - Does not call out to the network; strictly local. Remote posture (Notion Security Posture page freshness) is reflected via the `SWANLAKE_LAST_RUN` file, which the watchdog routine updates on successful writes.
 
 ## Future additions here
