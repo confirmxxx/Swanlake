@@ -29,6 +29,33 @@ class CLITest(unittest.TestCase):
                 cli.main([])
         self.assertNotEqual(cm.exception.code, 0)
 
+    def test_status_flag_dispatches_to_run_status(self):
+        """`--status` must call reconciler.status.run_status."""
+        from unittest.mock import patch
+        with patch('reconciler.status.run_status', return_value=0) as mock:
+            rc = cli.main(['--status'])
+        self.assertEqual(rc, 0)
+        mock.assert_called_once()
+
+    def test_sync_flag_dispatches_to_run_sync_all(self):
+        from unittest.mock import patch
+        with patch('reconciler.sync_vault.run_sync_all', return_value=0) as mock:
+            rc = cli.main(['--sync'])
+        self.assertEqual(rc, 0)
+        mock.assert_called_once()
+
+    def test_init_flag_dispatches_to_run_init(self):
+        from unittest.mock import patch
+        with patch('reconciler.init.run_init', return_value=0) as mock:
+            rc = cli.main(['--init'])
+        self.assertEqual(rc, 0)
+        mock.assert_called_once()
+
+    def test_mutually_exclusive_flags(self):
+        """Cannot specify both --status and --sync."""
+        with self.assertRaises(SystemExit):
+            cli.main(['--status', '--sync'])
+
 
 if __name__ == '__main__':
     unittest.main()
