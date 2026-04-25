@@ -14,16 +14,37 @@ set -u
 REGISTRY="${SWANLAKE_REGISTRY:-$HOME/.swanlake/canary-strings.txt}"
 LOG_DIR="${SWANLAKE_HITS_DIR:-$HOME/.swanlake/canary-hits}"
 
-mkdir -p "$LOG_DIR" 2>/dev/null || exit 0
+mkdir -p "$LOG_DIR" 2>/dev/null || {
+  echo "canary-match: cannot create log dir $LOG_DIR" >&2
+  exit 0
+}
 
-REGISTRY="$REGISTRY" LOG_DIR="$LOG_DIR" \
-python3 - <<'PY' || true
-import json, os, re, shutil, subprocess, sys
+# The Claude Code tool event payload arrives on this script's stdin. We must
+# forward it to the embedded python as stdin — not argv, not env — because:
+#   * argv (`python3 - "$payload"`) hits ARG_MAX (~2 MiB Linux, ~256 KiB
+#     macOS). execve fails E2BIG and the payload is lost.
+#   * envp shares the same ARG_MAX budget with argv; a ~2 MiB PAYLOAD env var
+#     also triggers E2BIG on Linux.
+#   * stdin is a pipe and has no ARG_MAX ceiling — only the pipe buffer, which
+#     python drains as it reads. Multi-MB payloads stream through cleanly.
+#
+# To keep stdin free for the payload we write the python program to a tempfile
+# and pass its path as argv[1]. The tempfile is deleted immediately after the
+# interpreter exits.
+#
+# We also drop the original `|| true` — a failing python hook should surface
+# the failure on stderr so the operator notices their tripwire is broken.
+# PostToolUse hooks do not block the tool call; a non-zero exit here only
+# affects the hook subshell.
+
+PROG="$(mktemp "${TMPDIR:-/tmp}/canary-match.XXXXXX.py")"
+trap 'rm -f "$PROG"' EXIT
+
+cat > "$PROG" <<'PY'
+import json, os, shutil, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Payload arrives on stdin; argv would hit ARG_MAX (~2 MiB Linux, ~256 KiB macOS)
-# and silently no-op on exactly the large tool responses where canaries most matter.
 raw = sys.stdin.read() or '{}'
 try:
     ev = json.loads(raw)
@@ -114,5 +135,9 @@ if nt:
     except Exception:
         pass
 PY
+
+# Run the program with the payload on stdin. No `|| true` — if python3 fails,
+# let the non-zero exit propagate so the operator can see the hook is broken.
+REGISTRY="$REGISTRY" LOG_DIR="$LOG_DIR" python3 "$PROG"
 
 exit 0

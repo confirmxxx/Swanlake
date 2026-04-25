@@ -202,6 +202,11 @@ def update_registry(state: dict) -> None:
 # -------- beacon emission --------
 
 def emit_beacon(surface_id: str, shaped: str, phrase: str, issued_utc: str) -> Path:
+    # Defense-in-depth: surface-id was validated by _validate_surface_id at every
+    # intake point, but re-check here in case a future caller bypasses those
+    # paths. Grammar forbids path separators and `..`, but a symlinked OUT_DIR
+    # could still redirect writes outside the repo — so resolve and verify.
+    _validate_surface_id(surface_id, context="emit_beacon")
     tpl = BEACON_TEMPLATE.read_text()
     filled = (
         tpl.replace("{{SURFACE_ID}}", surface_id)
@@ -211,6 +216,15 @@ def emit_beacon(surface_id: str, shaped: str, phrase: str, issued_utc: str) -> P
     )
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f"{surface_id}.md"
+    out_resolved = OUT_DIR.resolve()
+    path_resolved = path.resolve()
+    try:
+        path_resolved.relative_to(out_resolved)
+    except ValueError:
+        raise SystemExit(
+            f"path traversal guard: {surface_id!r} would resolve to "
+            f"{path_resolved}, outside OUT_DIR {out_resolved}"
+        )
     path.write_text(filled)
     return path
 
@@ -255,6 +269,28 @@ def op_generate(state: dict, surfaces: list[str], force_rotate: set[str]) -> Non
     print(f"\n{changed} surface(s) newly generated; {len(surfaces) - changed} reused.")
 
 
+def _acquire_lock():
+    """Advisory file lock around the state read-modify-write sequence.
+    Prevents concurrent invocations on the same machine from both reading the
+    same state, independently mutating it, and racing on the atomic writes
+    (last-writer-wins, missing surfaces from the loser). Lock is released when
+    the returned handle is garbage-collected or the process exits."""
+    import fcntl
+    lock_path = STATE_FILE.with_suffix(STATE_FILE.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(
+            f"error: another make-canaries.py is holding {lock_path}; "
+            f"wait for it to finish or remove the lock file if stale.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return fh
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Defense beacon canary generator")
     p.add_argument("--list", action="store_true", help="Show surface -> canary mapping")
@@ -267,11 +303,16 @@ def main(argv: list[str]) -> int:
         return 2
 
     all_surfaces = load_surfaces()
-    state = load_state()
 
     if args.list:
+        state = load_state()
         op_list(state)
         return 0
+
+    # Lock covers the state read-modify-write sequence. --list is read-only
+    # and does not need the lock.
+    _lock = _acquire_lock()  # noqa: F841 — handle kept alive via local ref
+    state = load_state()
 
     subset = [s.strip() for s in args.surfaces.split(",") if s.strip()] or all_surfaces
     for sid in subset:
