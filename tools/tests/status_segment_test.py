@@ -95,6 +95,47 @@ class CanaryPredicateTest(unittest.TestCase):
         # A scalar in the hits field is malformed — not a detection.
         self.assertFalse(ss._canary_hit({"hits": "yes"}))
 
+    def test_self_edit_noise_row_is_not_a_hit(self):
+        # The producer hook (canary-match.sh) tags Edit/Write payloads on
+        # known beacon-deployed surfaces with self_edit_noise=true. Those
+        # rows are true positives (the canary literally appeared) but
+        # operationally meaningless — routine edits of beacon-bearing
+        # files. The status-line must not count them or the counter goes
+        # to permanent noise the moment the operator touches CLAUDE.md.
+        rec = {
+            "hits": [{"token": "AKIA_BEACON_TESTFIXTURE000000000000",
+                      "locations": ["tool_input"]}],
+            "self_edit_noise": True,
+            "self_edit_reason": "deployed-beacon-file",
+        }
+        self.assertFalse(ss._canary_hit(rec))
+
+    def test_self_edit_noise_false_still_counts(self):
+        # Belt-and-suspenders: explicit false must still count.
+        rec = {
+            "hits": [{"token": "AKIA_BEACON_TESTFIXTURE000000000000",
+                      "locations": ["tool_response"]}],
+            "self_edit_noise": False,
+        }
+        self.assertTrue(ss._canary_hit(rec))
+
+    def test_missing_self_edit_noise_field_still_counts(self):
+        # Backwards compatibility — log rows written before the producer
+        # added the field are real hits unless proven otherwise.
+        rec = {"hits": [{"token": "AKIA_BEACON_TESTFIXTURE000000000000",
+                         "locations": ["tool_input"]}]}
+        self.assertTrue(ss._canary_hit(rec))
+
+    def test_truthy_non_bool_self_edit_noise_does_not_suppress(self):
+        # Defensive: only the boolean True suppresses. A string "true" or
+        # 1 would mean a buggy producer; we don't silently drop real
+        # detections on malformed flags.
+        for val in ("true", 1, "yes", [True]):
+            with self.subTest(val=val):
+                rec = {"hits": [{"token": "x", "locations": ["x"]}],
+                       "self_edit_noise": val}
+                self.assertTrue(ss._canary_hit(rec))
+
 
 class ExfilPredicateTest(unittest.TestCase):
     """Real hit = severity in {'block', 'warn'}; 'info' is noise."""

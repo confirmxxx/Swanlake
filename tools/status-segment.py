@@ -145,7 +145,22 @@ def _content_safety_hit(rec: dict) -> bool:
 
 def _canary_hit(rec: dict) -> bool:
     hits = rec.get("hits")
-    return isinstance(hits, list) and len(hits) > 0
+    if not (isinstance(hits, list) and len(hits) > 0):
+        return False
+    # Self-edit-noise: the canary-match hook tagged this row as a routine
+    # edit of a known beacon-deployed surface (the operator editing
+    # ATLAS/CLAUDE.md, the global CLAUDE.md, the canary registry itself,
+    # etc.). The canary literally appears in the payload — true positive —
+    # but it is operationally meaningless and would otherwise drown out
+    # real attack signal. Detection still happened; the row is in the log
+    # for forensic review; it just doesn't bump the status-line counter.
+    # The producer hook (canary-match.sh) only sets this flag after
+    # cross-checking the file path against a deployment map AND verifying
+    # every hit token belongs to a surface that owns this file — cross-
+    # surface contamination keeps the row counted.
+    if rec.get("self_edit_noise") is True:
+        return False
+    return True
 
 
 def _exfil_hit(rec: dict) -> bool:
