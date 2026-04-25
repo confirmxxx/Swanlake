@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Swanlake vault sync at 12:00 UTC
+Documentation=https://github.com/confirmxxx/Swanlake
+
+[Timer]
+OnCalendar=*-*-* 12:00:00 UTC
+Persistent=true
+Unit=swanlake-vault-sync.service
+
+[Install]
+WantedBy=timers.target
