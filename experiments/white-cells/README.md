@@ -1,5 +1,8 @@
 # White Cells — Phase 1 (alpha)
 
+> *"I gave you white cells, you weaponised."*
+> — Gorillaz, *The Sad God*
+
 Continuous AI red team for the public Swanlake defense framework.
 
 ## Status: alpha experiment
