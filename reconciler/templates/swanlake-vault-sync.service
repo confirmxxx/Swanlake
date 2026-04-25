@@ -1,0 +1,13 @@
+[Unit]
+Description=Swanlake vault sync — propagate canon templates to vault notes
+Documentation=https://github.com/confirmxxx/Swanlake
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -m reconciler.cli --sync
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal

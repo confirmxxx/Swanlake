@@ -1,0 +1,9 @@
+# swanlake-reconciler config — copy to ~/.config/swanlake-reconciler/config.toml
+# All paths absolute. No real secrets here.
+
+deployment_map_path = "/path/to/DEFENSE-BEACON/deployment-map.json"
+vault_root = "/path/to/your/obsidian-vault"
+notion_master_page_id = "REPLACE_WITH_PAGE_ID"
+notion_posture_page_id = "REPLACE_WITH_PAGE_ID"
+swanlake_repo_path = "/path/to/Swanlake"
+canon_dir = "/path/to/Swanlake/canon"
