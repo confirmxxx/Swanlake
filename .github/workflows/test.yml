@@ -26,3 +26,6 @@ jobs:
 
       - name: trust-zones — apply-mcp-scopes preflight tests
         run: bash trust-zones/reference/tests/apply_mcp_scopes_test.sh
+
+      - name: tools — status-segment unit tests
+        run: python3 tools/tests/status_segment_test.py
