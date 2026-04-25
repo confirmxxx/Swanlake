@@ -410,5 +410,53 @@ class StatuslineRenderTest(unittest.TestCase):
             self.assertIn("exfil:0/0", out)
 
 
+class ReconFlagTest(unittest.TestCase):
+    """Tests for the reconciler drift flag in status-segment.
+
+    The flag is driven by the SWANLAKE_RECON_OVERALL env var so the status
+    line never has to import the reconciler package — keeps tools/ free of
+    a cross-dependency on reconciler/. The reconciler CLI sets this var via
+    a thin shell wrapper (out of scope for this commit)."""
+
+    def setUp(self):
+        # Save and clear any pre-existing env var so tests are deterministic.
+        self._saved = os.environ.pop('SWANLAKE_RECON_OVERALL', None)
+
+    def tearDown(self):
+        if self._saved is not None:
+            os.environ['SWANLAKE_RECON_OVERALL'] = self._saved
+        else:
+            os.environ.pop('SWANLAKE_RECON_OVERALL', None)
+
+    def test_recon_flag_hidden_when_fresh(self):
+        os.environ['SWANLAKE_RECON_OVERALL'] = 'fresh'
+        flags = ss.build_flags()
+        self.assertFalse(any(f.startswith('recon') for f in flags))
+
+    def test_recon_flag_hidden_when_missing(self):
+        os.environ['SWANLAKE_RECON_OVERALL'] = 'missing'
+        flags = ss.build_flags()
+        # 'missing' is informational, not a drift alert — should NOT show
+        # in the recon flag (operator hasn't synced yet, that's its own issue
+        # surfaced elsewhere).
+        self.assertFalse(any(f.startswith('recon') for f in flags))
+
+    def test_recon_flag_drift_when_drift(self):
+        os.environ['SWANLAKE_RECON_OVERALL'] = 'drift'
+        flags = ss.build_flags()
+        self.assertIn('recon:drift', flags)
+
+    def test_recon_flag_red_when_drift_red(self):
+        os.environ['SWANLAKE_RECON_OVERALL'] = 'drift-red'
+        flags = ss.build_flags()
+        self.assertIn('recon:!', flags)
+
+    def test_recon_flag_hidden_when_env_unset(self):
+        # No env var → no recon flag at all (the reconciler isn't installed/wired)
+        os.environ.pop('SWANLAKE_RECON_OVERALL', None)
+        flags = ss.build_flags()
+        self.assertFalse(any(f.startswith('recon') for f in flags))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

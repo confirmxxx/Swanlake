@@ -312,6 +312,15 @@ def build_flags() -> list[str]:
     if cf:
         flags.append(cf)
 
+    # Reconciler drift flag — set by an upstream caller (the reconciler CLI's
+    # --status output, wrapped in a thin shell call). Read from an env var to
+    # avoid pulling reconciler/ as a dep just to render a glyph.
+    recon_overall = os.environ.get('SWANLAKE_RECON_OVERALL', '')
+    if recon_overall == 'drift':
+        flags.append('recon:drift')
+    elif recon_overall == 'drift-red':
+        flags.append('recon:!')
+
     return flags
 
 
