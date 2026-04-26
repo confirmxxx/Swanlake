@@ -1,0 +1,291 @@
+"""Tests for swanlake.commands.adapt.cc -- Claude Code adapter.
+
+Cases:
+  1. install creates hook files (with patched CC_DIR).
+  2. install is idempotent (second call doesn't duplicate settings entries).
+  3. install creates a backup when overwriting existing hooks.
+  4. verify detects a missing hook.
+  5. uninstall reads the manifest and reverses the install.
+  6. install errors cleanly when the target Claude Code dir is missing.
+
+Tests NEVER touch the operator's real ~/.claude/. Each test patches
+CC_DIR to a tempfile.TemporaryDirectory().
+"""
+from __future__ import annotations
+
+import io
+import json
+import sys
+import tempfile
+import unittest
+from argparse import Namespace
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from swanlake.commands.adapt import cc as cc_adapter
+from swanlake import state as _state
+
+
+def _ns(**kw) -> Namespace:
+    defaults = {
+        "json": False,
+        "quiet": False,
+        "cmd": "adapt",
+        "adapt_target": "cc",
+        "dry_run": False,
+        "uninstall": False,
+        "cc_dir": None,
+    }
+    defaults.update(kw)
+    return Namespace(**defaults)
+
+
+class CCAdapterTest(unittest.TestCase):
+    def setUp(self):
+        # Tmp state root for manifest writes.
+        self._tmpdir_state = tempfile.TemporaryDirectory()
+        self.tmp_state = Path(self._tmpdir_state.name)
+        self._original_root = _state.get_state_root()
+        _state.set_state_root(self.tmp_state)
+
+        # Tmp CC dir -- ALWAYS use this in tests, never ~/.claude.
+        self._tmpdir_cc = tempfile.TemporaryDirectory()
+        self.tmp_cc = Path(self._tmpdir_cc.name) / ".claude"
+        self.tmp_cc.mkdir(parents=True)
+
+    def tearDown(self):
+        _state.set_state_root(self._original_root)
+        self._tmpdir_state.cleanup()
+        self._tmpdir_cc.cleanup()
+
+    def _adapter(self):
+        return cc_adapter.ClaudeCodeAdapter(cc_dir=self.tmp_cc)
+
+    def test_install_creates_hook_files(self):
+        adapter = self._adapter()
+        rc = adapter.install()
+        self.assertEqual(rc, 0)
+        for hook_name in cc_adapter.HOOK_NAMES:
+            hp = self.tmp_cc / "hooks" / hook_name
+            self.assertTrue(hp.exists(), f"missing hook: {hp}")
+            # Executable bit set.
+            self.assertTrue(hp.stat().st_mode & 0o100)
+        # Skill installed.
+        self.assertTrue((self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists())
+        # Manifest written.
+        self.assertTrue(adapter.manifest_path.exists())
+        manifest = json.loads(adapter.manifest_path.read_text())
+        # Four hooks + skill = 5 installed entries.
+        installed_paths = {e["path"] for e in manifest["installed"]}
+        self.assertEqual(len(installed_paths), 5)
+
+    def test_install_is_idempotent(self):
+        adapter = self._adapter()
+        rc1 = adapter.install()
+        # Snapshot mtimes after first install.
+        hooks = list((self.tmp_cc / "hooks").iterdir())
+        mtimes_before = {p.name: p.stat().st_mtime for p in hooks}
+        # Settings.json count of canary-match command entries.
+        settings = json.loads(adapter.settings_path.read_text())
+        post_use = settings["hooks"]["PostToolUse"]
+        canary_cmd = str(self.tmp_cc / "hooks" / "canary-match.sh")
+        count_before = sum(
+            1 for entry in post_use
+            for h in (entry.get("hooks") or [])
+            if isinstance(h, dict) and h.get("command") == canary_cmd
+        )
+
+        rc2 = adapter.install()
+        self.assertEqual(rc1, 0)
+        self.assertEqual(rc2, 0)
+
+        # Hook files unchanged on second install (content was identical).
+        for p in (self.tmp_cc / "hooks").iterdir():
+            if p.name.endswith(".bak"):
+                continue
+            self.assertEqual(mtimes_before.get(p.name), p.stat().st_mtime,
+                             f"{p.name} was rewritten on idempotent install")
+        # settings.json must NOT have a duplicated canary-match entry.
+        settings2 = json.loads(adapter.settings_path.read_text())
+        post_use2 = settings2["hooks"]["PostToolUse"]
+        count_after = sum(
+            1 for entry in post_use2
+            for h in (entry.get("hooks") or [])
+            if isinstance(h, dict) and h.get("command") == canary_cmd
+        )
+        self.assertEqual(count_before, count_after,
+                         "settings.json duplicated the hook entry on re-install")
+
+    def test_install_creates_backup_when_overwriting(self):
+        adapter = self._adapter()
+        # Pre-existing different hook content -> install must back it up.
+        target = self.tmp_cc / "hooks" / "canary-match.sh"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("#!/usr/bin/env bash\necho prior content\n")
+        rc = adapter.install()
+        self.assertEqual(rc, 0)
+        # Backup file exists in same dir with .bak-swanlake- prefix.
+        backups = list((self.tmp_cc / "hooks").glob("canary-match.sh.bak-swanlake-*"))
+        self.assertEqual(len(backups), 1, f"expected exactly one backup; saw {backups}")
+        # Backup carries the prior content.
+        self.assertIn("prior content", backups[0].read_text())
+
+    def test_verify_detects_missing_hook(self):
+        adapter = self._adapter()
+        adapter.install()
+        # Remove one hook; verify must report it missing.
+        (self.tmp_cc / "hooks" / "canary-match.sh").unlink()
+        results = list(adapter.verify())
+        canary = next(r for r in results if r.surface_id == "canary-match.sh")
+        self.assertEqual(canary.status, "missing")
+        # Other hooks still intact.
+        skill = next(r for r in results if r.surface_id == "skill")
+        self.assertEqual(skill.status, "intact")
+
+    def test_uninstall_reads_manifest(self):
+        adapter = self._adapter()
+        adapter.install()
+        # Sanity: hooks present.
+        self.assertTrue((self.tmp_cc / "hooks" / "canary-match.sh").exists())
+        rc = adapter.uninstall()
+        self.assertEqual(rc, 0)
+        # All four hooks removed.
+        for hook_name in cc_adapter.HOOK_NAMES:
+            self.assertFalse(
+                (self.tmp_cc / "hooks" / hook_name).exists(),
+                f"{hook_name} not removed",
+            )
+        # Skill removed.
+        self.assertFalse((self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists())
+        # Manifest removed.
+        self.assertFalse(adapter.manifest_path.exists())
+
+    def test_install_without_cc_dir_errors_cleanly(self):
+        missing = Path(self._tmpdir_cc.name) / "nonexistent-claude"
+        adapter = cc_adapter.ClaudeCodeAdapter(cc_dir=missing)
+        captured_err = io.StringIO()
+        with patch("sys.stderr", captured_err):
+            rc = adapter.install()
+        self.assertEqual(rc, 2)
+        self.assertIn("does not exist", captured_err.getvalue())
+
+    def test_uninstall_removes_settings_entries(self):
+        """Regression for F1: uninstall must drop the settings.json hook
+        entries it added, not just the hook script files. Otherwise the
+        operator's CC session is left pointing at missing files."""
+        adapter = self._adapter()
+
+        # Install populates settings.json with our hook entries.
+        rc = adapter.install()
+        self.assertEqual(rc, 0)
+
+        settings = json.loads(adapter.settings_path.read_text())
+        canary_cmd = str(self.tmp_cc / "hooks" / "canary-match.sh")
+        firewall_cmd = str(self.tmp_cc / "hooks" / "bash-firewall.sh")
+
+        def _has_command(settings_dict, event, command):
+            bucket = (settings_dict.get("hooks") or {}).get(event) or []
+            for entry in bucket:
+                if isinstance(entry, dict):
+                    for h in entry.get("hooks") or []:
+                        if isinstance(h, dict) and h.get("command") == command:
+                            return True
+            return False
+
+        self.assertTrue(_has_command(settings, "PostToolUse", canary_cmd))
+        self.assertTrue(_has_command(settings, "PreToolUse", firewall_cmd))
+
+        # Manifest must record the additions for later cleanup.
+        manifest = json.loads(adapter.manifest_path.read_text())
+        added = manifest.get("settings_added") or []
+        commands_recorded = {entry.get("command") for entry in added}
+        self.assertIn(canary_cmd, commands_recorded)
+        self.assertIn(firewall_cmd, commands_recorded)
+
+        # Uninstall must drop those entries from settings.json.
+        rc2 = adapter.uninstall()
+        self.assertEqual(rc2, 0)
+
+        if adapter.settings_path.exists():
+            settings_after = json.loads(adapter.settings_path.read_text())
+            self.assertFalse(
+                _has_command(settings_after, "PostToolUse", canary_cmd),
+                "settings.json still references removed canary-match hook",
+            )
+            self.assertFalse(
+                _has_command(settings_after, "PreToolUse", firewall_cmd),
+                "settings.json still references removed bash-firewall hook",
+            )
+
+    def test_install_warns_on_malformed_hooks_bucket(self):
+        """F8: when settings.json has hooks.<event> as a non-list (string,
+        dict, ...), _patch_settings used to silently return False and the
+        operator wondered why hooks never fired. Now it warns to stderr."""
+        adapter = self._adapter()
+        # Pre-populate settings.json with PostToolUse as a string -- a
+        # schema-broken value the adapter cannot patch.
+        adapter.settings_path.write_text(json.dumps({
+            "hooks": {"PostToolUse": "this should have been a list"}
+        }, indent=2))
+
+        captured_err = io.StringIO()
+        with patch("sys.stderr", captured_err):
+            rc = adapter.install()
+        # Install completes (other surfaces still get installed) but the
+        # malformed bucket triggered a stderr warning.
+        self.assertEqual(rc, 0)
+        err = captured_err.getvalue()
+        self.assertIn("swanlake adapt cc:", err)
+        self.assertIn("PostToolUse", err)
+        self.assertIn("not a list", err)
+        # The string we planted survives -- we did not silently overwrite it.
+        settings_after = json.loads(adapter.settings_path.read_text())
+        self.assertEqual(
+            settings_after["hooks"]["PostToolUse"],
+            "this should have been a list",
+        )
+
+    def test_uninstall_preserves_unrelated_settings_entries(self):
+        """Operator-managed hook entries unrelated to swanlake must survive
+        an uninstall pass -- we only drop the entries we added."""
+        adapter = self._adapter()
+
+        # Pre-populate settings.json with an operator hook we did NOT install.
+        operator_cmd = "/usr/local/bin/operator-only-hook.sh"
+        operator_settings = {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [{"type": "command", "command": operator_cmd}],
+                    }
+                ]
+            }
+        }
+        adapter.settings_path.write_text(json.dumps(operator_settings, indent=2))
+
+        adapter.install()
+        adapter.uninstall()
+
+        # Operator hook still present.
+        self.assertTrue(adapter.settings_path.exists())
+        settings_after = json.loads(adapter.settings_path.read_text())
+        post = (settings_after.get("hooks") or {}).get("PostToolUse") or []
+        operator_still_present = any(
+            isinstance(e, dict)
+            and any(
+                isinstance(h, dict) and h.get("command") == operator_cmd
+                for h in (e.get("hooks") or [])
+            )
+            for e in post
+        )
+        self.assertTrue(
+            operator_still_present,
+            "uninstall destroyed an operator-managed hook entry",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

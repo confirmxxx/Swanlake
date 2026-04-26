@@ -50,6 +50,7 @@ Scopes for this repo:
 - `beacon` — Defense Beacon package
 - `zones` — Trust Zones package
 - `purity` — Reflex Purity package
+- `cli` — `swanlake/` unified CLI package + its `pyproject.toml` entry point
 - `docs` — docs/ root
 - `root` — repo-level files (README, LICENSE, etc.)
 

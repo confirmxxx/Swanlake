@@ -1,0 +1,52 @@
+# Trust-zone configuration for a CMA project.
+#
+# Each CMA in this project is assigned to one of four trust zones.
+# Zones determine which MCP / tool capabilities the CMA may use; the
+# adapter writes a tool-config file per CMA enforcing the zone's
+# allowlist on first install (and rewrites it idempotently on every
+# subsequent install).
+#
+# Defaults below are conservative -- a freshly-discovered CMA is
+# always classified INTERNAL with an empty allowlist until the
+# operator explicitly promotes it.
+#
+# See ~/projects/Swanlake/trust-zones/reference/ for canonical
+# semantics. This file is the per-project override.
+
+zones:
+  PUBLIC:
+    description: |
+      May read user input verbatim. May call LLMs. Must NOT touch
+      production data, secrets, or external write APIs.
+    mcp_allowlist:
+      - read_text
+      - search_text
+
+  INTERNAL:
+    description: |
+      Default for newly-discovered CMAs. May read curated internal
+      data. May call LLMs. May NOT call external write APIs.
+    mcp_allowlist: []
+
+  PRIVILEGED:
+    description: |
+      May call write APIs against production data. Must run inside a
+      reflex-purity-clean process. Must not see raw user input.
+    mcp_allowlist:
+      - write_db
+      - notify
+
+  REFLEX:
+    description: |
+      Hot-path inference. ZERO LLM calls in this zone -- the AST
+      purity check refuses any file that imports anthropic, openai,
+      claude, gpt, or llm at module level if it reaches a hot path.
+    mcp_allowlist:
+      - read_db
+      - write_db
+
+# Per-CMA assignments. Add one line per CMA; default is INTERNAL.
+cmas:
+  orchestrator: PUBLIC
+  data-extractor: INTERNAL
+  report-writer: PUBLIC
