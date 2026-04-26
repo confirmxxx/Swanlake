@@ -177,5 +177,111 @@ class BenchFullStubTest(unittest.TestCase):
         self.assertIn("not implemented", captured.getvalue())
 
 
+class BenchResolveScriptTest(unittest.TestCase):
+    """Bug #4: bench script resolution must NOT depend on CWD.
+
+    The operator-facing /swanlake-upd flow runs `swanlake bench --quick`
+    from whatever directory the operator's shell happens to be in
+    (typically ~ for a fresh-machine bootstrap). Pre-v0.2.2 the wrapper
+    only consulted CWD, so the call failed with `cannot locate
+    bench/live-fire-rerun.sh` whenever the operator was outside a clone.
+
+    The fix routes resolution through _compat.find_repo_root() which
+    walks up from the package install location -- so a `pip install -e .`
+    checkout is always findable regardless of the calling shell's CWD.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+
+        # Build a fake repo root with the bench script in the expected place.
+        self._fake_repo = self.tmp / "fake_repo"
+        (self._fake_repo / "bench").mkdir(parents=True)
+        self._script = self._fake_repo / "bench" / "live-fire-rerun.sh"
+        self._script.write_text("#!/usr/bin/env bash\necho fake\n")
+        self._script.chmod(0o755)
+
+        # Build a separate, scriptless CWD that stands in for "operator
+        # ran swanlake from ~". The CWD-only legacy lookup MUST miss
+        # here so the test is meaningful.
+        self._cwd = self.tmp / "elsewhere"
+        self._cwd.mkdir()
+
+        self._original_cwd = os.getcwd()
+        os.chdir(self._cwd)
+
+        # Make sure SWANLAKE_REPO_ROOT does not leak in from the operator's
+        # actual env -- otherwise the env-var branch (tier 1) would mask
+        # the install-path branch (tier 2) we are trying to exercise.
+        self._env_patch = patch.dict(
+            os.environ, {"SWANLAKE_REPO_ROOT": ""}, clear=False
+        )
+        self._env_patch.start()
+        # Empty string is falsy via the `if env_root:` guard, so tier 1
+        # is effectively disabled. Belt + braces: also delete the key so
+        # the diagnostic-message branch reads "unset", not "set-empty".
+        os.environ.pop("SWANLAKE_REPO_ROOT", None)
+
+    def tearDown(self):
+        self._env_patch.stop()
+        os.chdir(self._original_cwd)
+        self._tmpdir.cleanup()
+
+    def test_bench_resolves_via_install_path_not_cwd(self):
+        """Tier 2 (install-path via _compat.find_repo_root) wins.
+
+        Sanity: our temp CWD does NOT contain bench/live-fire-rerun.sh,
+        so the legacy CWD-fallback branch can't accidentally satisfy
+        this test. A passing assertion proves the install-path branch
+        was the one that resolved.
+        """
+        legacy_only = Path.cwd() / "bench" / "live-fire-rerun.sh"
+        self.assertFalse(
+            legacy_only.exists(),
+            "test fixture leaked: CWD-fallback path exists, can't prove "
+            "install-path resolution is what found the script",
+        )
+
+        with patch.object(
+            _compat, "find_repo_root", return_value=self._fake_repo
+        ):
+            resolved = bench_cmd._resolve_script()
+
+        self.assertIsNotNone(
+            resolved,
+            "bench must resolve the script via _compat.find_repo_root() "
+            "even when CWD has no bench/ directory",
+        )
+        self.assertEqual(resolved, self._script)
+
+    def test_env_var_overrides_install_path(self):
+        """Tier 1 (SWANLAKE_REPO_ROOT) wins over tier 2 when both exist."""
+        # Build an alternate repo root reachable only via the env var.
+        env_repo = self.tmp / "env_repo"
+        (env_repo / "bench").mkdir(parents=True)
+        env_script = env_repo / "bench" / "live-fire-rerun.sh"
+        env_script.write_text("#!/usr/bin/env bash\necho env\n")
+
+        with patch.dict(os.environ, {"SWANLAKE_REPO_ROOT": str(env_repo)}), \
+             patch.object(_compat, "find_repo_root", return_value=self._fake_repo):
+            resolved = bench_cmd._resolve_script()
+        self.assertEqual(resolved, env_script)
+
+    def test_all_three_tiers_miss_returns_none_with_attempts(self):
+        """When every tier misses, _resolve_script_with_attempts lists
+        every path tried so the error message can name them."""
+        with patch.object(
+            _compat,
+            "find_repo_root",
+            side_effect=_compat.CompatError("no repo"),
+        ):
+            resolved, attempts = bench_cmd._resolve_script_with_attempts()
+        self.assertIsNone(resolved)
+        # No env var set, _compat raised, only the CWD fallback was attempted.
+        self.assertEqual(len(attempts), 1)
+        self.assertTrue(str(attempts[0]).endswith("bench/live-fire-rerun.sh"))
+
+
 if __name__ == "__main__":
     unittest.main()
