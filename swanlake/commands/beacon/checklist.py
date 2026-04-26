@@ -1,5 +1,13 @@
 """`swanlake beacon checklist` -- emit paste-checklist for REMOTE surfaces.
 
+`--remind-export-stale <duration>` checks the mtime of
+~/.swanlake/routines-export.json and warns on stderr if it's older than
+the given duration. D8 says routines are export-only; the operator
+re-exports on a cadence they pick, and this flag surfaces drift in that
+cadence.
+
+
+
 Spec §6. Default output: stdout. `--out FILE` writes mode 0600 with a
 stderr warning that the file contains live canary tokens.
 
@@ -26,9 +34,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from swanlake import state as _state
 from swanlake.commands.beacon import _history, _surfaces
 from swanlake.commands.beacon._registry import (
     SCOPE_REMOTE,
@@ -67,6 +77,55 @@ _PASTE_ACTION_TEMPLATES = {
         "beacon block (if any) with the content below"
     ),
 }
+
+
+_DURATION_RE = re.compile(r"^(\d+)([dhm])$")
+
+
+def _parse_duration_seconds(spec: str) -> int | None:
+    """Parse `30d` / `12h` / `15m` into seconds. Returns None on bad input."""
+    m = _DURATION_RE.match(spec.strip())
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2)
+    if unit == "d":
+        return n * 86400
+    if unit == "h":
+        return n * 3600
+    if unit == "m":
+        return n * 60
+    return None
+
+
+def _check_routines_export_stale(spec: str) -> str | None:
+    """Return a warning string if the export file is older than `spec`.
+
+    Returns None if the file is fresh, the spec is malformed (caller's
+    bug; we surface a different warning), or the file is absent (a
+    distinct warning -- the operator hasn't exported yet).
+    """
+    duration = _parse_duration_seconds(spec)
+    if duration is None:
+        return f"--remind-export-stale: bad duration {spec!r} (use e.g. 30d, 12h, 15m)"
+    export_path = _state.state_path("routines-export.json")
+    if not export_path.exists():
+        return (
+            f"routines export not found at {export_path}; "
+            "run a manual export from the routines UI"
+        )
+    try:
+        mtime = export_path.stat().st_mtime
+    except OSError:
+        return f"could not stat {export_path}"
+    age = time.time() - mtime
+    if age > duration:
+        days = int(age / 86400)
+        return (
+            f"routines export at {export_path} is {days}d old "
+            f"(threshold {spec}); re-export from the routines UI"
+        )
+    return None
 
 
 def _resolve_repo_root() -> Path | None:
@@ -224,6 +283,13 @@ def run(args) -> int:
     quiet = bool(getattr(args, "quiet", False))
     out_path_str: str | None = getattr(args, "out", None)
     only_surface = getattr(args, "surface", None)
+    remind_stale: str | None = getattr(args, "remind_export_stale", None)
+
+    # Routines-export staleness warning. Goes to stderr; never blocks.
+    if remind_stale:
+        warning = _check_routines_export_stale(remind_stale)
+        if warning:
+            eprint(f"swanlake beacon checklist: {warning}")
 
     repo_root = _resolve_repo_root()
     if repo_root is None:

@@ -53,6 +53,7 @@ def _ns(**kw) -> Namespace:
         "out": None,
         "surface": None,
         "include": "pending",
+        "remind_export_stale": None,
     }
     defaults.update(kw)
     return Namespace(**defaults)
@@ -206,6 +207,83 @@ class ChecklistHistoryTest(ChecklistBaseTest):
             and r.get("outcome") == "checklist-printed"
             for r in records
         ))
+
+
+class ChecklistStalenessTest(ChecklistBaseTest):
+    """v0.3.x bonus: --remind-export-stale warning."""
+
+    def test_export_missing_warns(self):
+        captured_err = io.StringIO()
+        with patch.object(
+            cl_cmd, "_collect_remote_surfaces",
+            return_value=[("repo-x", "github-public", "acme/x:README.md")],
+        ), patch.object(cl_cmd, "_resolve_repo_root", return_value=self.repo), \
+             patch(
+                 "swanlake.commands.beacon.checklist.subprocess.run",
+                 side_effect=_patched_subprocess_run(self.repo, "repo-x", "Tail9999"),
+             ), patch("sys.stdout", io.StringIO()), \
+             patch("sys.stderr", captured_err):
+            cl_cmd.run(_ns(remind_export_stale="30d"))
+        err = captured_err.getvalue()
+        self.assertIn("routines export not found", err)
+
+    def test_export_fresh_no_warning(self):
+        # Touch a recent export file.
+        export = _state.state_path("routines-export.json")
+        export.parent.mkdir(parents=True, exist_ok=True)
+        export.write_text("{}")
+        captured_err = io.StringIO()
+        with patch.object(
+            cl_cmd, "_collect_remote_surfaces",
+            return_value=[("repo-x", "github-public", "acme/x:README.md")],
+        ), patch.object(cl_cmd, "_resolve_repo_root", return_value=self.repo), \
+             patch(
+                 "swanlake.commands.beacon.checklist.subprocess.run",
+                 side_effect=_patched_subprocess_run(self.repo, "repo-x", "Tail9998"),
+             ), patch("sys.stdout", io.StringIO()), \
+             patch("sys.stderr", captured_err):
+            cl_cmd.run(_ns(remind_export_stale="30d"))
+        # Fresh export -> no staleness warning. Other stderr (warnings) may
+        # still appear, but the "stale" / "not found" tags should not.
+        err = captured_err.getvalue()
+        self.assertNotIn("routines export not found", err)
+        self.assertNotIn("threshold", err)
+
+    def test_export_stale_warns(self):
+        import os as _os
+        export = _state.state_path("routines-export.json")
+        export.parent.mkdir(parents=True, exist_ok=True)
+        export.write_text("{}")
+        # Backdate by 60 days.
+        old = _os.stat(export).st_mtime - 60 * 86400
+        _os.utime(export, (old, old))
+        captured_err = io.StringIO()
+        with patch.object(
+            cl_cmd, "_collect_remote_surfaces",
+            return_value=[("repo-x", "github-public", "acme/x:README.md")],
+        ), patch.object(cl_cmd, "_resolve_repo_root", return_value=self.repo), \
+             patch(
+                 "swanlake.commands.beacon.checklist.subprocess.run",
+                 side_effect=_patched_subprocess_run(self.repo, "repo-x", "Tail9997"),
+             ), patch("sys.stdout", io.StringIO()), \
+             patch("sys.stderr", captured_err):
+            cl_cmd.run(_ns(remind_export_stale="30d"))
+        err = captured_err.getvalue()
+        self.assertIn("threshold", err)
+
+    def test_bad_duration_warns(self):
+        captured_err = io.StringIO()
+        with patch.object(
+            cl_cmd, "_collect_remote_surfaces",
+            return_value=[("repo-x", "github-public", "acme/x:README.md")],
+        ), patch.object(cl_cmd, "_resolve_repo_root", return_value=self.repo), \
+             patch(
+                 "swanlake.commands.beacon.checklist.subprocess.run",
+                 side_effect=_patched_subprocess_run(self.repo, "repo-x", "Tail9996"),
+             ), patch("sys.stdout", io.StringIO()), \
+             patch("sys.stderr", captured_err):
+            cl_cmd.run(_ns(remind_export_stale="bogus"))
+        self.assertIn("bad duration", captured_err.getvalue())
 
 
 class ChecklistTemplateTest(unittest.TestCase):

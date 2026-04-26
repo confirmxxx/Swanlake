@@ -202,6 +202,68 @@ def _probe_git() -> dict[str, Any]:
     return {"status": "pass", "detail": p, "fix": None}
 
 
+def _probe_notion_token() -> dict[str, Any]:
+    """Warn-only probe: SWANLAKE_NOTION_TOKEN must be set if any notion-* surface exists.
+
+    Per spec D11: Notion verify uses an operator-supplied read-only
+    integration token. Token absence isn't a hard failure (the operator
+    may not need Notion verify), but we surface it as a warning if the
+    coverage inventory carries any notion-shaped surface so the operator
+    knows why `swanlake beacon verify --surface <notion-id>` would
+    return `unconfigured`.
+    """
+    from swanlake import coverage as _cov
+    from swanlake.commands.beacon._registry import infer_type
+    from swanlake.commands.beacon.verify import NOTION_TOKEN_ENV
+
+    has_notion_surface = False
+    try:
+        cov = _cov.list_surfaces()
+        for sid, entry in (cov.get("surfaces") or {}).items():
+            if not isinstance(sid, str):
+                continue
+            type_id = (
+                entry.get("type") if isinstance(entry, dict) and entry.get("type")
+                else infer_type(sid)
+            )
+            if type_id == "notion":
+                has_notion_surface = True
+                break
+    except Exception:
+        # Coverage read failure is reported by other probes; don't double-warn.
+        return {
+            "status": "pass",
+            "detail": "no notion surfaces or coverage unreadable",
+            "fix": None,
+        }
+
+    if not has_notion_surface:
+        return {
+            "status": "pass",
+            "detail": "no notion-* surfaces in coverage; token not needed",
+            "fix": None,
+        }
+
+    token = os.environ.get(NOTION_TOKEN_ENV)
+    if not token:
+        return {
+            "status": "warn",
+            "detail": (
+                f"{NOTION_TOKEN_ENV} not set; "
+                "`swanlake beacon verify` will return `unconfigured` for notion surfaces"
+            ),
+            "fix": (
+                f"export {NOTION_TOKEN_ENV}=<read-only integration token> "
+                "(create one at https://www.notion.so/my-integrations)"
+            ),
+        }
+    return {
+        "status": "pass",
+        "detail": f"{NOTION_TOKEN_ENV} set ({len(token)} chars)",
+        "fix": None,
+    }
+
+
 def _safe(fn: Callable[[], dict[str, Any]], name: str) -> dict[str, Any]:
     try:
         result = fn()
@@ -224,6 +286,7 @@ PROBES = (
     ("python3 on PATH", _probe_python3),
     ("gh available", _probe_gh),
     ("git available", _probe_git),
+    ("notion verify token", _probe_notion_token),
 )
 
 

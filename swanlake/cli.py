@@ -341,6 +341,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="pending",
         help="Include only pending REMOTE surfaces, or all of them.",
     )
+    checklist_p.add_argument(
+        "--remind-export-stale",
+        metavar="DURATION",
+        default=None,
+        help=(
+            "Warn on stderr if ~/.swanlake/routines-export.json mtime is older "
+            "than DURATION (e.g. `30d`). Routines are export-only (D8); the "
+            "operator must re-export periodically. Format: <int>(d|h|m)."
+        ),
+    )
     verify_p = beacon_sub.add_parser(
         "verify",
         help="Thin wrapper over `swanlake verify` with REMOTE-type dispatch.",
