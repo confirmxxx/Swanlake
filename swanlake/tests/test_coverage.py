@@ -123,6 +123,39 @@ class CoverageScanTest(unittest.TestCase):
         payload = cov.list_surfaces()
         self.assertIn("fixture-surface", payload["surfaces"])
 
+    def test_scan_walks_nested_claude_md(self):
+        """Regression for v0.2.1 #2: monorepo / split-package layouts put
+        CLAUDE.md at depths > 1. The single-level glob missed them; rglob
+        now walks the full tree (skipping VCS/build/cache dirs)."""
+        # Build a deep-nested CLAUDE.md: projects/<repo>/packages/<pkg>/CLAUDE.md
+        deep_marker_surface = "deep-nested-surface"
+        deep_marker_tail = "DeepX0YZ"
+        deep_marker = f"{_PREFIX}-{deep_marker_surface}-{deep_marker_tail}"
+        deep_dir = self.projects / "Monorepo" / "packages" / "core" / "agent"
+        deep_dir.mkdir(parents=True)
+        (deep_dir / "CLAUDE.md").write_text(
+            f"# Nested package\n\n{deep_marker}\n"
+        )
+
+        # Also drop a CLAUDE.md inside a SKIP_DIR (node_modules) -- must
+        # be ignored. Use a distinct surface so a leak would be visible.
+        skip_marker = f"{_PREFIX}-skip-this-NoNoNoXX"
+        skip_dir = self.projects / "Monorepo" / "node_modules" / "vendor-pkg"
+        skip_dir.mkdir(parents=True)
+        (skip_dir / "CLAUDE.md").write_text(
+            f"# Vendored dep\n\n{skip_marker}\n"
+        )
+
+        payload = cov.scan(
+            projects_root=self.projects,
+            deployment_map=self.dmap,
+        )
+        surfaces = payload["surfaces"]
+        # The deep-nested surface was found.
+        self.assertIn(deep_marker_surface, surfaces)
+        # The skip-dir surface was NOT picked up.
+        self.assertNotIn("skip-this", surfaces)
+
     def test_scan_does_not_echo_canary_tail(self):
         """Critical: scan output (stdout, JSON, written file) must never
         contain the 8-char tail of the attribution marker."""

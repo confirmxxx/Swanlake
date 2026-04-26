@@ -180,10 +180,15 @@ def run(args) -> int:
             f"bench script exit {rc}; last-bench NOT updated", quiet=False
         )
     # Pass through the script's exit code so callers see the real result.
-    if rc == USAGE:
-        # Bench script's own "missing hook" exit (it uses exit 2). We
-        # already printed an error; surface a non-zero swanlake exit.
-        return ALARM if rc != 0 else CLEAN
+    if rc == 2:
+        # bench/live-fire-rerun.sh uses `exit 2` for its own setup errors
+        # (missing hook script, hook not executable, fetch dependency
+        # absent). Surface that as USAGE so a calling shell can tell a
+        # configuration problem apart from a real benchmark alarm. The
+        # numeric value of USAGE intentionally collides with ALARM (both
+        # 2 by argparse convention), but using the named constant keeps
+        # the intent legible at the call site.
+        return USAGE
     return CLEAN if rc == 0 else ALARM
 
 

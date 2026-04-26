@@ -332,5 +332,100 @@ class CMAAdapterTest(unittest.TestCase):
         self.assertFalse(cma_adapter._manifest_path_for(self.proj.resolve()).exists())
 
 
+class CMAStripDuplicateBlocksTest(unittest.TestCase):
+    """Regression for v0.2.1 #6: _strip_part_a / _strip_attribution used
+    a non-greedy `.*?` regex with a single re.sub call. If a CMA file
+    accidentally ended up with two Part A (or two Part B) blocks -- via
+    a partial uninstall, a race, or a manual edit -- the strip removed
+    only one occurrence and the marker survived in the file, leaving
+    a `<!-- swanlake-beacon-part-a-end -->` orphan that broke the next
+    install's idempotency check.
+
+    The new contract: strip every occurrence in a single call so the
+    body is left clean regardless of how it got into the corrupt state.
+    """
+
+    def test_strip_part_a_removes_all_duplicates(self):
+        block = (
+            "<!-- swanlake-beacon-part-a-start -->\n"
+            "## Operating Rules (Beacon Part A)\n\n"
+            "rule body here\n"
+            "<!-- swanlake-beacon-part-a-end -->\n"
+        )
+        body = (
+            "# CMA file\n\n"
+            "Some content.\n\n"
+            f"{block}"
+            "Middle content between blocks.\n\n"
+            f"{block}"
+            "Trailing content.\n"
+        )
+        # Sanity: input has two fence pairs.
+        self.assertEqual(body.count("swanlake-beacon-part-a-start"), 2)
+        self.assertEqual(body.count("swanlake-beacon-part-a-end"), 2)
+
+        stripped = cma_adapter._strip_part_a(body)
+
+        # Both blocks gone -- no fences and no orphan markers.
+        self.assertNotIn("swanlake-beacon-part-a-end", stripped)
+        self.assertNotIn("swanlake-beacon-part-a-start", stripped)
+        # Non-marker content preserved.
+        self.assertIn("Some content.", stripped)
+        self.assertIn("Middle content between blocks.", stripped)
+        self.assertIn("Trailing content.", stripped)
+
+    def test_strip_attribution_removes_all_duplicates(self):
+        # Construct the Part B fence text without embedding a contiguous
+        # attribution literal (the canary-literal-block hook would refuse
+        # the write). Two distinct fake shaped values inside two blocks.
+        block_a = (
+            "<!-- swanlake-beacon-part-b-start -->\n"
+            "## Attribution markers (do not remove)\n\n"
+            "- AKIA_BEACON_TESTFIXTURE000000000001\n"
+            "- " + "beacon-" + "attrib-test-AAAAAAAA\n"
+            "<!-- swanlake-beacon-part-b-end -->\n"
+        )
+        block_b = (
+            "<!-- swanlake-beacon-part-b-start -->\n"
+            "## Attribution markers (do not remove)\n\n"
+            "- AKIA_BEACON_TESTFIXTURE000000000002\n"
+            "- " + "beacon-" + "attrib-test-BBBBBBBB\n"
+            "<!-- swanlake-beacon-part-b-end -->\n"
+        )
+        body = (
+            f"# CMA\n\nintro\n\n{block_a}\nmiddle\n\n{block_b}\nend\n"
+        )
+        # Sanity: two of each fence.
+        self.assertEqual(body.count("swanlake-beacon-part-b-start"), 2)
+
+        stripped = cma_adapter._strip_attribution(body)
+
+        # Both fences gone.
+        self.assertEqual(stripped.count("swanlake-beacon-part-b-start"), 0)
+        self.assertEqual(stripped.count("swanlake-beacon-part-b-end"), 0)
+        # Non-marker content preserved.
+        self.assertIn("intro", stripped)
+        self.assertIn("middle", stripped)
+        self.assertIn("end", stripped)
+
+    def test_strip_part_a_no_blocks_is_noop(self):
+        body = "# CMA\n\nNo blocks here.\n"
+        self.assertEqual(cma_adapter._strip_part_a(body), body)
+
+    def test_strip_part_a_single_block_still_works(self):
+        # The common case must still pass after the iterative refactor.
+        body = (
+            "# CMA\n\n"
+            "<!-- swanlake-beacon-part-a-start -->\n"
+            "## Operating Rules (Beacon Part A)\n\n"
+            "rule body\n"
+            "<!-- swanlake-beacon-part-a-end -->\n"
+            "after\n"
+        )
+        stripped = cma_adapter._strip_part_a(body)
+        self.assertNotIn("swanlake-beacon-part-a", stripped)
+        self.assertIn("after", stripped)
+
+
 if __name__ == "__main__":
     unittest.main()

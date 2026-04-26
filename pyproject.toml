@@ -39,12 +39,17 @@ swanlake = "swanlake.__main__:main"
 [tool.setuptools]
 # Both packages ship together. The reconciler keeps its own CLI entry point
 # (`python3 -m reconciler.cli`) so the existing systemd timer keeps working.
+#
+# `swanlake.tests` is intentionally NOT shipped in the wheel: the test
+# suite + fixtures bloat the install footprint and let users
+# `import swanlake.tests` and inadvertently rely on internals that
+# carry no stability guarantee. Tests still run from the dev checkout
+# (the directory is on disk; only the installed wheel changes).
 packages = [
   "swanlake",
   "swanlake.commands",
   "swanlake.commands.adapt",
   "swanlake.adapters",
-  "swanlake.tests",
   "reconciler",
 ]
 include-package-data = true
@@ -52,6 +57,13 @@ include-package-data = true
 [tool.setuptools.package-data]
 "swanlake.adapters" = [
   "templates/cc/*.sh",
-  "templates/cc/SKILL.md",
+  "templates/cc/skills/*/SKILL.md",
   "templates/cma/*.yaml",
 ]
+
+[tool.setuptools.exclude-package-data]
+# `include-package-data = true` would otherwise sweep tests/ into the
+# wheel as data files for the parent `swanlake` package, even though
+# `swanlake.tests` is no longer in the packages list. Block the whole
+# tests subtree so wheel builds carry zero test artifacts.
+"swanlake" = ["tests/*", "tests/**/*"]

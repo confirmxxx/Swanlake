@@ -187,6 +187,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the Claude Code dir (default: ~/.claude).",
     )
+    cc_p.add_argument(
+        "--skill-only",
+        action="store_true",
+        help=(
+            "Install (or uninstall) only the /swanlake slash-command "
+            "skill; skip hook scripts and settings.json patching. Use "
+            "when the operator runs their own production hooks and only "
+            "wants the skill on top."
+        ),
+    )
     cma_p = adapt_sub.add_parser(
         "cma",
         help="Install Beacon Part A + zones into a CMA project.",

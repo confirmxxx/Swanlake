@@ -110,6 +110,12 @@ def _dim_canary() -> dict[str, Any]:
     """Today's canary hits from the status-segment counter."""
     seg = _compat.status_segment_module()
     hits, fires = seg.count_today(seg.CANARY_DIR, seg._canary_hit)
+    # Severity semantics (spec A9): any positive hit count -> ALARM. The
+    # threat model treats a single canary fire as one too many, so we
+    # never demote on low hit counts. The `fires` field is informational
+    # only -- we do NOT compare hits-vs-fires (a corrupt log could put
+    # them out of sync; the safe default is to surface the alarm and let
+    # the operator inspect the underlying logs).
     status = "alarm" if hits > 0 else "clean"
     return {
         "status": status,
@@ -123,6 +129,11 @@ def _dim_inject() -> dict[str, Any]:
     """Today's content-safety / prompt-injection hits."""
     seg = _compat.status_segment_module()
     hits, fires = seg.count_today(seg.CONTENT_DIR, seg._content_safety_hit)
+    # Severity semantics (spec A9): any positive hit count -> ALARM. One
+    # detected injection attempt is treated as a confirmed event; we do
+    # not require corroboration via the `fires` count because the threat
+    # model already accepts the false-positive cost in exchange for never
+    # silently swallowing a real hit.
     status = "alarm" if hits > 0 else "clean"
     return {
         "status": status,
@@ -136,6 +147,11 @@ def _dim_exfil() -> dict[str, Any]:
     """Today's exfil-monitor hits."""
     seg = _compat.status_segment_module()
     hits, fires = seg.count_today(seg.EXFIL_DIR, seg._exfil_hit)
+    # Severity semantics (spec A9): any positive hit count -> ALARM. The
+    # exfil monitor's false-positive rate is intentionally tuned low
+    # enough that a single hit warrants operator attention; a corrupt
+    # log file with hits>0 and fires==0 surfaces as ALARM rather than
+    # being silently demoted (fail-loud, not fail-soft).
     status = "alarm" if hits > 0 else "clean"
     return {
         "status": status,

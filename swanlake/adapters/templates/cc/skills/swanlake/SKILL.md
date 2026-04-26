@@ -1,9 +1,6 @@
 ---
 name: swanlake
-description: |
-  Quick access to the Swanlake unified CLI from inside Claude Code.
-  Use this skill to run swanlake status / doctor / verify / coverage
-  without leaving the harness. Posture, drift, and adapter management.
+description: Generic Swanlake CLI shim — use ONLY when the operator types /swanlake with explicit subcommand args, OR when no other swanlake-* skill matches the intent. Always prefer the specific swanlake-status / swanlake-doctor / swanlake-verify / swanlake-coverage / swanlake-sync / swanlake-bench / swanlake-init / swanlake-adapt skill over this catch-all when intent is clear.
 disable-model-invocation: false
 ---
 
