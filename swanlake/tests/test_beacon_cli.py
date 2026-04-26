@@ -50,15 +50,6 @@ class BeaconArgparseTest(unittest.TestCase):
         self.assertIn("missing subcommand", captured_err.getvalue())
 
 
-class BeaconStubDispatchTest(unittest.TestCase):
-    """The remaining stub: checklist (lands in the next commit)."""
-
-    def test_checklist_stub_returns_not_implemented(self):
-        with patch("sys.stderr", io.StringIO()):
-            rc = cli.main(["beacon", "checklist"])
-        self.assertEqual(rc, NOT_IMPLEMENTED)
-
-
 class BeaconRegistryTest(unittest.TestCase):
     """Surface-type registry sanity."""
 
