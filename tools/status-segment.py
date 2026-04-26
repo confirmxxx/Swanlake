@@ -149,7 +149,7 @@ def _canary_hit(rec: dict) -> bool:
         return False
     # Self-edit-noise: the canary-match hook tagged this row as a routine
     # edit of a known beacon-deployed surface (the operator editing
-    # ATLAS/CLAUDE.md, the global CLAUDE.md, the canary registry itself,
+    # a project's CLAUDE.md, the global CLAUDE.md, the canary registry itself,
     # etc.). The canary literally appears in the payload — true positive —
     # but it is operationally meaningless and would otherwise drown out
     # real attack signal. Detection still happened; the row is in the log
