@@ -312,15 +312,25 @@ def _inject_part_a(body: str, part_a_text: str) -> str:
     return body + sep + block
 
 
+_PART_A_STRIP_RE = re.compile(
+    r"\n*<!-- swanlake-beacon-part-a-start -->.*?"
+    r"<!-- swanlake-beacon-part-a-end -->\n?",
+    flags=re.DOTALL,
+)
+
+
 def _strip_part_a(body: str) -> str:
-    """Remove the swanlake-beacon-part-a fenced block from body."""
-    return re.sub(
-        r"\n*<!-- swanlake-beacon-part-a-start -->.*?"
-        r"<!-- swanlake-beacon-part-a-end -->\n?",
-        "",
-        body,
-        flags=re.DOTALL,
-    )
+    """Remove every swanlake-beacon-part-a fenced block from body.
+
+    Defensive against duplicate blocks: if a CMA file ends up with
+    two Part A fences (race, manual edit, partial uninstall), the
+    non-greedy `.*?` pattern would only consume one match per
+    re.sub call. Loop until no match remains so a single uninstall
+    pass leaves zero markers behind.
+    """
+    while _PART_A_STRIP_RE.search(body):
+        body = _PART_A_STRIP_RE.sub("", body, count=1)
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -385,14 +395,23 @@ def _inject_attribution(body: str, shaped: str, phrase: str) -> str:
     return body + sep + block
 
 
+_PART_B_STRIP_RE = re.compile(
+    r"\n*<!-- swanlake-beacon-part-b-start -->.*?"
+    r"<!-- swanlake-beacon-part-b-end -->\n?",
+    flags=re.DOTALL,
+)
+
+
 def _strip_attribution(body: str) -> str:
-    return re.sub(
-        r"\n*<!-- swanlake-beacon-part-b-start -->.*?"
-        r"<!-- swanlake-beacon-part-b-end -->\n?",
-        "",
-        body,
-        flags=re.DOTALL,
-    )
+    """Remove every swanlake-beacon-part-b (attribution) fenced block.
+
+    Same defensive shape as _strip_part_a: iterate until no match
+    remains so duplicate blocks (from a partial uninstall, race, or
+    manual edit) are all removed in one call.
+    """
+    while _PART_B_STRIP_RE.search(body):
+        body = _PART_B_STRIP_RE.sub("", body, count=1)
+    return body
 
 
 # ---------------------------------------------------------------------------
