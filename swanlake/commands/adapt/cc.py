@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,9 +61,29 @@ def _templates_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "adapters" / "templates" / "cc"
 
 
-def _atomic_write(path: Path, text: str, mode: int = 0o644) -> None:
-    """Atomic write with explicit chmod for executable scripts."""
+def _atomic_write(path: Path, text: str, mode: int | None = None) -> None:
+    """Atomic write. Preserves existing file mode by default.
+
+    If `mode` is None and the target file already exists, the existing
+    mode is reused. This protects operator hardening: if someone tightens
+    ~/.claude/settings.json to 0o600 because it carries personal API
+    tokens, a later `swanlake adapt cc` must not silently widen it to
+    0o644.
+
+    Callers that need a specific mode (e.g. hook scripts that must be
+    executable) pass `mode=0o755` explicitly.
+
+    For brand-new files where no prior mode exists, default to 0o644.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    if mode is None:
+        if path.exists():
+            try:
+                mode = stat.S_IMODE(path.stat().st_mode)
+            except OSError:
+                mode = 0o644
+        else:
+            mode = 0o644
     tmp = path.with_suffix(path.suffix + ".swanlake-tmp")
     tmp.write_text(text, encoding="utf-8")
     os.chmod(tmp, mode)

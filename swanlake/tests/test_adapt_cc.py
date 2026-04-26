@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -245,6 +247,62 @@ class CCAdapterTest(unittest.TestCase):
         self.assertEqual(
             settings_after["hooks"]["PostToolUse"],
             "this should have been a list",
+        )
+
+    def test_atomic_write_preserves_existing_mode(self):
+        """Regression for v0.2.1 #4: _atomic_write defaulted to mode=0o644
+        and unconditionally chmod-ed, so an operator who tightened
+        ~/.claude/settings.json to 0o600 (sane for a file with personal
+        API tokens) saw it widened back to 0o644 on every adapt run.
+
+        The new contract: when mode=None (the default) and the target
+        file exists, inherit its current mode."""
+        target = Path(self._tmpdir_cc.name) / "preserve-mode-target"
+        target.write_text("initial\n", encoding="utf-8")
+        os.chmod(target, 0o600)
+        # Sanity precondition.
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+        cc_adapter._atomic_write(target, "rewritten\n")
+        self.assertEqual(target.read_text(), "rewritten\n")
+        # Mode preserved -- did NOT widen to 0o644.
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+    def test_atomic_write_uses_default_mode_for_new_file(self):
+        """A brand-new file (no prior mode to inherit) lands at 0o644."""
+        target = Path(self._tmpdir_cc.name) / "brand-new-target"
+        self.assertFalse(target.exists())
+        cc_adapter._atomic_write(target, "fresh\n")
+        self.assertTrue(target.exists())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+
+    def test_atomic_write_explicit_mode_overrides_inherit(self):
+        """Hook scripts pass mode=0o755 explicitly; that must win even if
+        the file already exists with a tighter mode."""
+        target = Path(self._tmpdir_cc.name) / "hook-target.sh"
+        target.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        os.chmod(target, 0o600)
+        cc_adapter._atomic_write(target, "#!/usr/bin/env bash\nnew\n", mode=0o755)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o755)
+
+    def test_install_does_not_widen_hardened_settings_mode(self):
+        """End-to-end variant of the regression: an operator pre-hardens
+        settings.json to 0o600, then runs adapt cc. After install, mode
+        must still be 0o600 (not 0o644)."""
+        adapter = self._adapter()
+        # Pre-create a hardened settings.json with valid empty hooks dict.
+        adapter.settings_path.write_text("{}\n", encoding="utf-8")
+        os.chmod(adapter.settings_path, 0o600)
+
+        rc = adapter.install()
+        self.assertEqual(rc, 0)
+        # File was patched (hooks added), so the write path ran.
+        post = json.loads(adapter.settings_path.read_text())
+        self.assertIn("hooks", post)
+        # And the mode survived.
+        self.assertEqual(
+            stat.S_IMODE(adapter.settings_path.stat().st_mode), 0o600,
+            "adapt cc widened a hardened settings.json from 0o600 to 0o644",
         )
 
     def test_uninstall_preserves_unrelated_settings_entries(self):
