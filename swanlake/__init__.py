@@ -6,4 +6,4 @@ docs/v0.2-unified-cli-spec.md for the full surface.
 """
 from __future__ import annotations
 
-__version__ = "0.2.2"
+__version__ = "0.3.0-dev"

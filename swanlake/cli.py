@@ -30,9 +30,11 @@ SUBCOMMANDS = (
     "init",
     "adapt",
     "coverage",
+    "beacon",
 )
 
 ADAPT_TARGETS = ("cc", "cma", "sdk")
+BEACON_OPS = ("list", "sweep", "deploy", "checklist", "verify")
 
 
 def _common_flags_parser() -> argparse.ArgumentParser:
@@ -266,6 +268,97 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
     )
 
+    # beacon: sweep + deploy + checklist + verify (v0.3 spec).
+    beacon_p = sub.add_parser(
+        "beacon",
+        help="Sweep + deploy beacons across LOCAL/REMOTE surfaces.",
+        parents=[common],
+    )
+    beacon_sub = beacon_p.add_subparsers(
+        dest="beacon_op", metavar="<op>"
+    )
+    beacon_sub.add_parser(
+        "list",
+        help="Print the surface-type matrix (read-only).",
+        parents=[common],
+    )
+    sweep_p = beacon_sub.add_parser(
+        "sweep",
+        help="Find unbeaconed surfaces; emit a deployment plan (no writes).",
+        parents=[common],
+    )
+    sweep_p.add_argument(
+        "--scope",
+        choices=("local", "remote", "all"),
+        default="all",
+        help="Restrict the sweep to LOCAL, REMOTE, or all surface types.",
+    )
+    sweep_p.add_argument(
+        "--no-coverage-write",
+        action="store_true",
+        help="Do not update coverage.json with discovered surfaces.",
+    )
+    deploy_p = beacon_sub.add_parser(
+        "deploy",
+        help="LOCAL deploy to one surface (REMOTE prints checklist hint).",
+        parents=[common],
+    )
+    deploy_p.add_argument(
+        "surface",
+        metavar="SURFACE",
+        help="Surface ID to deploy (must exist in surfaces.yaml).",
+    )
+    deploy_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the 12-step plan without writing or backing up.",
+    )
+    deploy_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (also honored: SWANLAKE_NONINTERACTIVE=1).",
+    )
+    checklist_p = beacon_sub.add_parser(
+        "checklist",
+        help="Emit a paste-checklist for REMOTE surfaces.",
+        parents=[common],
+    )
+    checklist_p.add_argument(
+        "--out",
+        metavar="FILE",
+        default=None,
+        help="Write to FILE mode 0600 (default: stdout).",
+    )
+    checklist_p.add_argument(
+        "--surface",
+        metavar="NAME",
+        default=None,
+        help="Restrict the checklist to a single surface.",
+    )
+    checklist_p.add_argument(
+        "--include",
+        choices=("pending", "all"),
+        default="pending",
+        help="Include only pending REMOTE surfaces, or all of them.",
+    )
+    verify_p = beacon_sub.add_parser(
+        "verify",
+        help="Thin wrapper over `swanlake verify` with REMOTE-type dispatch.",
+        parents=[common],
+    )
+    verify_p.add_argument(
+        "--surface",
+        metavar="NAME",
+        default=None,
+        help="Restrict the check to a single surface.",
+    )
+    verify_p.add_argument(
+        "--since",
+        metavar="ISO-8601",
+        default=None,
+        help="Skip surfaces verified on or after this timestamp.",
+    )
+
     return parser
 
 
@@ -313,6 +406,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     if cmd == "coverage":
         from swanlake.commands import coverage as coverage_cmd
         return coverage_cmd.run(args)
+    if cmd == "beacon":
+        from swanlake.commands import beacon as beacon_cmd
+        return beacon_cmd.run(args)
 
     # Defensive: unknown subcommand reached dispatch (should be caught by argparse).
     print(f"swanlake: unknown subcommand {cmd!r}", file=sys.stderr)
@@ -340,6 +436,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         subcmd = getattr(args, "adapt_target", None)
     elif cmd == "coverage":
         subcmd = getattr(args, "coverage_op", None)
+    elif cmd == "beacon":
+        subcmd = getattr(args, "beacon_op", None)
     else:
         subcmd = None
 
