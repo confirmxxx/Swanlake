@@ -71,6 +71,31 @@ class OptOutMarkerTest(unittest.TestCase):
         # Ceiling = inner; walk stops there, never sees outer's marker.
         self.assertIsNone(_optout.find_marker(target, ceiling=inner))
 
+    def test_nested_marker_overrides_ancestor(self):
+        """B13: a deeper marker takes precedence over an ancestor marker."""
+        outer = self.root / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        # Outer marker excludes EVERYTHING.
+        (outer / _optout.OPTOUT_FILENAME).write_text("")
+        # Inner marker excludes only `cms-foo`.
+        (inner / _optout.OPTOUT_FILENAME).write_text(
+            "surfaces: [cms-foo]\n"
+        )
+        target = inner / "CLAUDE.md"
+        target.write_text("# stub")
+        # cms-foo is excluded by inner; cms-bar is NOT excluded by inner --
+        # the outer marker is shadowed by the inner one (nearest-ancestor wins).
+        excluded_foo, marker_foo = _optout.is_excluded(target, "cms-foo")
+        self.assertTrue(excluded_foo)
+        self.assertEqual(marker_foo.path, inner / _optout.OPTOUT_FILENAME)
+        excluded_bar, marker_bar = _optout.is_excluded(target, "cms-bar")
+        self.assertFalse(excluded_bar)
+        # marker_bar is still the inner one (the walker stops at the
+        # nearest marker; it does not continue up to find a more
+        # permissive one).
+        self.assertEqual(marker_bar.path, inner / _optout.OPTOUT_FILENAME)
+
     def test_malformed_marker_fails_closed(self):
         sub = self.root / "broken"
         sub.mkdir()

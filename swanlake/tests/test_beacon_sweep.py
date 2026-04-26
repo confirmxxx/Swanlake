@@ -127,6 +127,36 @@ class SweepClassificationTest(SweepBaseTest):
         self.assertEqual(len(payload["partial"]), 1)
         self.assertEqual(payload["partial"][0]["surface"], "cms-projectc")
 
+    def test_optout_per_surface_filter(self):
+        """B13: `surfaces: [...]` form excludes only listed IDs."""
+        proj = self.projects / "Mixed"
+        proj.mkdir()
+        (proj / _optout.OPTOUT_FILENAME).write_text(
+            "surfaces: [cms-mixed-skip]\n"
+        )
+        # Two CLAUDE.md files in the same opted-out subtree.
+        skip_target = proj / "skip-here" / "CLAUDE.md"
+        skip_target.parent.mkdir()
+        skip_target.write_text("# skipped")
+        keep_target = proj / "keep-here" / "CLAUDE.md"
+        keep_target.parent.mkdir()
+        keep_target.write_text("# also bare; should report unbeaconed")
+        self._seed_coverage({
+            "cms-mixed-skip": [str(skip_target)],
+            "cms-mixed-keep": [str(keep_target)],
+        })
+
+        with patch.object(_cov, "_scan_projects", return_value={}), \
+             patch.object(sweep_cmd, "discover_surfaces_yaml", return_value=None):
+            payload = sweep_cmd.compute(scope="local")
+
+        skipped_ids = {row["surface"] for row in payload["skipped_by_optout"]}
+        unbeaconed_ids = {row["surface"] for row in payload["unbeaconed"]}
+        self.assertIn("cms-mixed-skip", skipped_ids)
+        self.assertNotIn("cms-mixed-skip", unbeaconed_ids)
+        # The non-listed surface is NOT excluded -- it still drifts.
+        self.assertIn("cms-mixed-keep", unbeaconed_ids)
+
     def test_optout_marker_skips_surface(self):
         proj = self.projects / "Scratchpad"
         proj.mkdir()
