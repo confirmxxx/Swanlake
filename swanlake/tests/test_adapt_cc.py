@@ -39,6 +39,7 @@ def _ns(**kw) -> Namespace:
         "dry_run": False,
         "uninstall": False,
         "cc_dir": None,
+        "skill_only": False,
     }
     defaults.update(kw)
     return Namespace(**defaults)
@@ -343,6 +344,159 @@ class CCAdapterTest(unittest.TestCase):
             operator_still_present,
             "uninstall destroyed an operator-managed hook entry",
         )
+
+
+class CCSkillOnlyTest(unittest.TestCase):
+    """Tests for `swanlake adapt cc --skill-only` (v0.2.1 #8).
+
+    The flag lets operators with their own production hooks install just
+    the /swanlake slash-command skill without replacing or patching
+    anything else. Same flag on uninstall reverses only the skill,
+    leaving prior full-install state intact for a later non-skill-only
+    cleanup pass.
+    """
+
+    def setUp(self):
+        self._tmpdir_state = tempfile.TemporaryDirectory()
+        self.tmp_state = Path(self._tmpdir_state.name)
+        self._original_root = _state.get_state_root()
+        _state.set_state_root(self.tmp_state)
+
+        self._tmpdir_cc = tempfile.TemporaryDirectory()
+        self.tmp_cc = Path(self._tmpdir_cc.name) / ".claude"
+        self.tmp_cc.mkdir(parents=True)
+
+    def tearDown(self):
+        _state.set_state_root(self._original_root)
+        self._tmpdir_state.cleanup()
+        self._tmpdir_cc.cleanup()
+
+    def _adapter(self):
+        return cc_adapter.ClaudeCodeAdapter(cc_dir=self.tmp_cc)
+
+    def test_skill_only_install_writes_only_skill(self):
+        adapter = self._adapter()
+        rc = adapter.install(skill_only=True)
+        self.assertEqual(rc, 0)
+        # Skill present.
+        self.assertTrue(
+            (self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists()
+        )
+        # No hook files.
+        hooks_dir = self.tmp_cc / "hooks"
+        if hooks_dir.exists():
+            for hook_name in cc_adapter.HOOK_NAMES:
+                self.assertFalse(
+                    (hooks_dir / hook_name).exists(),
+                    f"--skill-only wrote hook script {hook_name}",
+                )
+        # No settings.json.
+        self.assertFalse(
+            adapter.settings_path.exists(),
+            "--skill-only created settings.json (should never touch it)",
+        )
+        # Manifest present, records only the skill, and remembers the mode.
+        self.assertTrue(adapter.manifest_path.exists())
+        manifest = json.loads(adapter.manifest_path.read_text())
+        self.assertTrue(manifest.get("skill_only"))
+        kinds = {e.get("kind") for e in manifest.get("installed", [])}
+        self.assertEqual(kinds, {"skill"})
+
+    def test_skill_only_install_does_not_touch_existing_settings(self):
+        """Operator's preexisting settings.json must survive byte-identically."""
+        adapter = self._adapter()
+        existing = {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [{"type": "command", "command": "/op/own.sh"}],
+                    }
+                ]
+            },
+            "operator_setting": True,
+        }
+        adapter.settings_path.write_text(
+            json.dumps(existing, indent=2), encoding="utf-8"
+        )
+        before_bytes = adapter.settings_path.read_bytes()
+        before_mtime = adapter.settings_path.stat().st_mtime
+
+        # Sleep granularity guard: read mtime BEFORE install, ensure
+        # the file is unchanged AFTER. We compare bytes for equality.
+        rc = adapter.install(skill_only=True)
+        self.assertEqual(rc, 0)
+        # Bytes identical -- no patch ran.
+        self.assertEqual(adapter.settings_path.read_bytes(), before_bytes)
+        # mtime identical -- no rewrite even with same content.
+        self.assertEqual(adapter.settings_path.stat().st_mtime, before_mtime)
+
+    def test_skill_only_dry_run_plans_only_skill(self):
+        """Dry-run output for --skill-only must mention only the skill."""
+        adapter = self._adapter()
+        captured = io.StringIO()
+        with patch("sys.stdout", captured):
+            rc = adapter.install(dry_run=True, skill_only=True)
+        self.assertEqual(rc, 0)
+        out = captured.getvalue()
+        self.assertIn("skill", out)
+        # No hook lines, no patch-settings lines.
+        self.assertNotIn("hook", out)
+        self.assertNotIn("patch-settings", out)
+        # Nothing actually written.
+        self.assertFalse(
+            (self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists()
+        )
+        self.assertFalse(adapter.settings_path.exists())
+
+    def test_skill_only_uninstall_after_skill_only_install(self):
+        """A skill-only install reverses cleanly with --skill-only uninstall."""
+        adapter = self._adapter()
+        adapter.install(skill_only=True)
+        self.assertTrue(
+            (self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists()
+        )
+        rc = adapter.uninstall(skill_only=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            (self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists()
+        )
+        # Manifest gone (it had nothing left after skill removal).
+        self.assertFalse(adapter.manifest_path.exists())
+
+    def test_skill_only_uninstall_preserves_full_install_entries(self):
+        """If a prior full install left hook + settings entries in the
+        manifest, a --skill-only uninstall must remove only the skill
+        and leave the rest intact for a later full uninstall pass."""
+        adapter = self._adapter()
+        # Full install populates manifest with hooks + skill + settings.
+        adapter.install()
+        # Pre-state sanity: skill + at least one hook + settings entries.
+        full_manifest = json.loads(adapter.manifest_path.read_text())
+        kinds_before = {e.get("kind") for e in full_manifest["installed"]}
+        self.assertIn("skill", kinds_before)
+        self.assertIn("hook", kinds_before)
+        self.assertTrue(full_manifest.get("settings_added"))
+
+        # Skill-only uninstall: skill goes, hooks + settings stay.
+        rc = adapter.uninstall(skill_only=True)
+        self.assertEqual(rc, 0)
+        self.assertFalse(
+            (self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists()
+        )
+        # Hooks still present.
+        for hook_name in cc_adapter.HOOK_NAMES:
+            self.assertTrue(
+                (self.tmp_cc / "hooks" / hook_name).exists(),
+                f"--skill-only uninstall removed hook {hook_name}",
+            )
+        # Manifest still records the surviving entries.
+        self.assertTrue(adapter.manifest_path.exists())
+        leftover = json.loads(adapter.manifest_path.read_text())
+        kinds_after = {e.get("kind") for e in leftover["installed"]}
+        self.assertNotIn("skill", kinds_after)
+        self.assertIn("hook", kinds_after)
+        self.assertTrue(leftover.get("settings_added"))
 
 
 if __name__ == "__main__":

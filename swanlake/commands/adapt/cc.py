@@ -187,43 +187,51 @@ class ClaudeCodeAdapter(Adapter):
 
     # --- install ---
 
-    def _plan(self) -> list[dict[str, Any]]:
-        """Return the install plan as a list of {action, path, ...} dicts."""
+    def _plan(self, skill_only: bool = False) -> list[dict[str, Any]]:
+        """Return the install plan as a list of {action, path, ...} dicts.
+
+        When `skill_only` is True, the plan contains only the skill
+        write step. Hook copying and settings.json patching are
+        omitted entirely so an operator running their own production
+        hooks sees no surprise mutations to ~/.claude/settings.json.
+        """
         plan: list[dict[str, Any]] = []
         templates = _templates_dir()
-        for hook_name in HOOK_NAMES:
-            src = templates / hook_name
-            dst = self.hooks_dir / hook_name
-            if not dst.exists():
-                plan.append({"action": "create-hook", "src": str(src), "dst": str(dst)})
-            elif dst.read_text(encoding="utf-8") != src.read_text(encoding="utf-8"):
-                plan.append({"action": "replace-hook", "src": str(src), "dst": str(dst)})
-            else:
-                plan.append({"action": "noop-hook", "dst": str(dst)})
-        # Skill
+        if not skill_only:
+            for hook_name in HOOK_NAMES:
+                src = templates / hook_name
+                dst = self.hooks_dir / hook_name
+                if not dst.exists():
+                    plan.append({"action": "create-hook", "src": str(src), "dst": str(dst)})
+                elif dst.read_text(encoding="utf-8") != src.read_text(encoding="utf-8"):
+                    plan.append({"action": "replace-hook", "src": str(src), "dst": str(dst)})
+                else:
+                    plan.append({"action": "noop-hook", "dst": str(dst)})
+        # Skill -- always part of the plan, in both modes.
         skill_src = templates / "SKILL.md"
         if not self.skill_path.exists():
             plan.append({"action": "create-skill", "src": str(skill_src), "dst": str(self.skill_path)})
         else:
             plan.append({"action": "noop-skill", "dst": str(self.skill_path)})
-        # settings.json patch
-        for hook_name, event in HOOK_EVENT.items():
-            command = str(self.hooks_dir / hook_name)
-            plan.append({
-                "action": "patch-settings",
-                "event": event,
-                "command": command,
-            })
+        # settings.json patch -- skipped in skill-only mode.
+        if not skill_only:
+            for hook_name, event in HOOK_EVENT.items():
+                command = str(self.hooks_dir / hook_name)
+                plan.append({
+                    "action": "patch-settings",
+                    "event": event,
+                    "command": command,
+                })
         return plan
 
-    def install(self, dry_run: bool = False) -> int:
+    def install(self, dry_run: bool = False, skill_only: bool = False) -> int:
         if not self.cc_dir.exists():
             eprint(
                 f"swanlake adapt cc: {self.cc_dir} does not exist. "
                 f"Install Claude Code first (https://claude.ai/code), then re-run."
             )
             return USAGE
-        plan = self._plan()
+        plan = self._plan(skill_only=skill_only)
         if dry_run:
             for step in plan:
                 print_line(f"would: {step['action']}  {step.get('dst', step.get('command', ''))}",
@@ -233,85 +241,92 @@ class ClaudeCodeAdapter(Adapter):
         manifest = _read_manifest(self.manifest_path)
         installed: list[dict[str, Any]] = list(manifest.get("installed") or [])
         modified: list[dict[str, Any]] = list(manifest.get("modified") or [])
+        # Persist the install mode so uninstall can refuse to drop hooks
+        # the operator never asked us to install. A skill-only install
+        # leaves the operator's existing hooks alone; uninstall must do
+        # the same.
+        manifest["skill_only"] = bool(skill_only)
 
         templates = _templates_dir()
 
-        # Hook scripts.
-        self.hooks_dir.mkdir(parents=True, exist_ok=True)
-        for hook_name in HOOK_NAMES:
-            src = templates / hook_name
-            dst = self.hooks_dir / hook_name
-            content = src.read_text(encoding="utf-8")
-            if dst.exists() and dst.read_text(encoding="utf-8") == content:
-                # Idempotent: already in place. Track as installed
-                # only if the manifest doesn't already record it (so
-                # uninstall removes it).
+        if not skill_only:
+            # Hook scripts.
+            self.hooks_dir.mkdir(parents=True, exist_ok=True)
+            for hook_name in HOOK_NAMES:
+                src = templates / hook_name
+                dst = self.hooks_dir / hook_name
+                content = src.read_text(encoding="utf-8")
+                if dst.exists() and dst.read_text(encoding="utf-8") == content:
+                    # Idempotent: already in place. Track as installed
+                    # only if the manifest doesn't already record it (so
+                    # uninstall removes it).
+                    if not any(i.get("path") == str(dst) for i in installed):
+                        installed.append({"kind": "hook", "path": str(dst)})
+                    continue
+                if dst.exists():
+                    backup = dst.with_name(f"{dst.name}.bak-swanlake-{_ts_suffix()}")
+                    shutil.copy2(dst, backup)
+                    modified.append({
+                        "kind": "hook-overwritten",
+                        "path": str(dst),
+                        "backup": str(backup),
+                    })
+                _atomic_write(dst, content, mode=0o755)
                 if not any(i.get("path") == str(dst) for i in installed):
                     installed.append({"kind": "hook", "path": str(dst)})
-                continue
-            if dst.exists():
-                backup = dst.with_name(f"{dst.name}.bak-swanlake-{_ts_suffix()}")
-                shutil.copy2(dst, backup)
-                modified.append({
-                    "kind": "hook-overwritten",
-                    "path": str(dst),
-                    "backup": str(backup),
-                })
-            _atomic_write(dst, content, mode=0o755)
-            if not any(i.get("path") == str(dst) for i in installed):
-                installed.append({"kind": "hook", "path": str(dst)})
 
-        # Skill.
+        # Skill -- always installed, in both modes.
         skill_src = templates / "SKILL.md"
         skill_content = skill_src.read_text(encoding="utf-8")
         if not self.skill_path.exists():
             _atomic_write(self.skill_path, skill_content)
             installed.append({"kind": "skill", "path": str(self.skill_path)})
 
-        # settings.json patch.
-        if self.settings_path.exists():
-            try:
-                settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                eprint(
-                    f"swanlake adapt cc: {self.settings_path} is unreadable; "
-                    "skipping settings patch."
-                )
-                settings = None
-        else:
-            settings = {}
-
         settings_added: list[dict[str, str]] = list(
             manifest.get("settings_added") or []
         )
-        if isinstance(settings, dict):
-            changed = False
-            for hook_name, event in HOOK_EVENT.items():
-                command = str(self.hooks_dir / hook_name)
-                if _patch_settings(settings, event, command, self.hooks_dir / hook_name):
-                    changed = True
-                    # Track the entry so uninstall() can find and remove it.
-                    if not any(
-                        a.get("event") == event and a.get("command") == command
-                        for a in settings_added
-                    ):
-                        settings_added.append({"event": event, "command": command})
-            if changed:
-                # Backup before overwrite (only when we actually change it).
-                backup = self.settings_path.with_name(
-                    f"{self.settings_path.name}.bak-swanlake-{_ts_suffix()}"
-                )
-                if self.settings_path.exists():
-                    shutil.copy2(self.settings_path, backup)
-                    modified.append({
-                        "kind": "settings",
-                        "path": str(self.settings_path),
-                        "backup": str(backup),
-                    })
-                _atomic_write(
-                    self.settings_path,
-                    json.dumps(settings, sort_keys=True, indent=2) + "\n",
-                )
+        if not skill_only:
+            # settings.json patch.
+            if self.settings_path.exists():
+                try:
+                    settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    eprint(
+                        f"swanlake adapt cc: {self.settings_path} is unreadable; "
+                        "skipping settings patch."
+                    )
+                    settings = None
+            else:
+                settings = {}
+
+            if isinstance(settings, dict):
+                changed = False
+                for hook_name, event in HOOK_EVENT.items():
+                    command = str(self.hooks_dir / hook_name)
+                    if _patch_settings(settings, event, command, self.hooks_dir / hook_name):
+                        changed = True
+                        # Track the entry so uninstall() can find and remove it.
+                        if not any(
+                            a.get("event") == event and a.get("command") == command
+                            for a in settings_added
+                        ):
+                            settings_added.append({"event": event, "command": command})
+                if changed:
+                    # Backup before overwrite (only when we actually change it).
+                    backup = self.settings_path.with_name(
+                        f"{self.settings_path.name}.bak-swanlake-{_ts_suffix()}"
+                    )
+                    if self.settings_path.exists():
+                        shutil.copy2(self.settings_path, backup)
+                        modified.append({
+                            "kind": "settings",
+                            "path": str(self.settings_path),
+                            "backup": str(backup),
+                        })
+                    _atomic_write(
+                        self.settings_path,
+                        json.dumps(settings, sort_keys=True, indent=2) + "\n",
+                    )
 
         manifest["installed"] = installed
         manifest["modified"] = modified
@@ -323,11 +338,21 @@ class ClaudeCodeAdapter(Adapter):
 
     # --- uninstall ---
 
-    def uninstall(self, dry_run: bool = False) -> int:
+    def uninstall(self, dry_run: bool = False, skill_only: bool = False) -> int:
         manifest = _read_manifest(self.manifest_path)
         installed = manifest.get("installed") or []
         modified = manifest.get("modified") or []
         settings_added = manifest.get("settings_added") or []
+
+        if skill_only:
+            # Reverse only the skill-only install. Hook + settings entries
+            # in the manifest (left over from a previous full install)
+            # stay untouched -- the operator can drop --skill-only on a
+            # later uninstall to fully clean up.
+            installed = [e for e in installed if e.get("kind") == "skill"]
+            modified = []
+            settings_added = []
+
         if not installed and not modified and not settings_added:
             print_line("nothing to uninstall (no manifest entries)", quiet=False)
             return CLEAN
@@ -410,7 +435,33 @@ class ClaudeCodeAdapter(Adapter):
                 except OSError as e:
                     eprint(f"swanlake adapt cc --uninstall: cannot restore {path}: {e}")
 
-        # Drop the manifest -- a future install rebuilds it.
+        if skill_only:
+            # Skill-only uninstall: drop only the skill from the
+            # manifest, leave hook + settings entries (if any) so the
+            # operator can later run a non-skill-only uninstall to
+            # fully clean up. Re-load the original manifest because
+            # `installed`/`modified`/`settings_added` were narrowed at
+            # the top of this function.
+            full_manifest = _read_manifest(self.manifest_path)
+            full_manifest["installed"] = [
+                e for e in (full_manifest.get("installed") or [])
+                if e.get("kind") != "skill"
+            ]
+            if not (
+                full_manifest.get("installed")
+                or full_manifest.get("modified")
+                or full_manifest.get("settings_added")
+            ):
+                # Manifest is empty after skill removal -- drop it.
+                try:
+                    self.manifest_path.unlink()
+                except OSError:
+                    pass
+            else:
+                _write_manifest(self.manifest_path, full_manifest)
+            return CLEAN
+
+        # Full uninstall: drop the manifest -- a future install rebuilds it.
         try:
             self.manifest_path.unlink()
         except OSError:
@@ -443,12 +494,19 @@ class ClaudeCodeAdapter(Adapter):
 def run(args) -> int:
     quiet = bool(getattr(args, "quiet", False))
     cc_dir = getattr(args, "cc_dir", None)
+    skill_only = bool(getattr(args, "skill_only", False))
     adapter = ClaudeCodeAdapter(
         cc_dir=Path(cc_dir).expanduser() if cc_dir else None
     )
     if getattr(args, "uninstall", False):
-        return adapter.uninstall(dry_run=getattr(args, "dry_run", False))
-    return adapter.install(dry_run=getattr(args, "dry_run", False))
+        return adapter.uninstall(
+            dry_run=getattr(args, "dry_run", False),
+            skill_only=skill_only,
+        )
+    return adapter.install(
+        dry_run=getattr(args, "dry_run", False),
+        skill_only=skill_only,
+    )
 
 
 __all__ = ["ClaudeCodeAdapter", "run", "CC_DIR", "HOOK_NAMES"]
