@@ -75,14 +75,19 @@ class CCAdapterTest(unittest.TestCase):
             self.assertTrue(hp.exists(), f"missing hook: {hp}")
             # Executable bit set.
             self.assertTrue(hp.stat().st_mode & 0o100)
-        # Skill installed.
+        # Catch-all skill installed (alongside the per-subcommand skills
+        # bundled by v0.2.1 #9; deeper coverage in CCMultiSkillTest).
         self.assertTrue((self.tmp_cc / "skills" / "swanlake" / "SKILL.md").exists())
         # Manifest written.
         self.assertTrue(adapter.manifest_path.exists())
         manifest = json.loads(adapter.manifest_path.read_text())
-        # Four hooks + skill = 5 installed entries.
+        # 4 hooks + every bundled skill = 4 + N installed entries.
+        skill_count = len(cc_adapter._discover_skill_templates())
         installed_paths = {e["path"] for e in manifest["installed"]}
-        self.assertEqual(len(installed_paths), 5)
+        self.assertEqual(
+            len(installed_paths),
+            len(cc_adapter.HOOK_NAMES) + skill_count,
+        )
 
     def test_install_is_idempotent(self):
         adapter = self._adapter()
