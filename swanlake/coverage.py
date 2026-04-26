@@ -46,6 +46,22 @@ DEFAULT_DEPLOYMENT_MAP = (
     Path.home() / "projects" / "DEFENSE-BEACON" / "deployment-map.json"
 )
 
+# Directory names skipped during the recursive CLAUDE.md walk. These are
+# either VCS / build / cache trees that legitimately never carry attribution
+# markers, or vendored dirs whose stray CLAUDE.md files (e.g. inside a
+# node_modules dependency) would create noise without adding signal.
+SKIP_DIRS = frozenset({
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".mypy_cache",
+})
+
 
 def _scan_file(path: Path) -> set[str]:
     """Return the set of surface IDs found in `path`. Tail bytes discarded."""
@@ -64,16 +80,22 @@ def _scan_file(path: Path) -> set[str]:
 def _scan_projects(
     projects_root: Path = DEFAULT_PROJECTS_ROOT,
 ) -> dict[str, list[str]]:
-    """Walk projects_root for CLAUDE.md files; return {surface: [paths]}.
+    """Walk projects_root recursively for CLAUDE.md files;
+    return {surface: [paths]}.
+
+    Nested layouts (e.g. ~/projects/<repo>/packages/<x>/CLAUDE.md) are
+    common in monorepos and split-package projects, so a single-level
+    glob misses them. We rglob and skip well-known build/VCS/cache dirs
+    via SKIP_DIRS to keep the walk bounded.
 
     Paths are returned but the canary tail is never included.
     """
     found: dict[str, list[str]] = {}
     if not projects_root.exists():
         return found
-    # Glob a single level of project dirs; deeper CLAUDE.md files are
-    # legitimate but not the canonical attribution surface.
-    for cm in projects_root.glob("*/CLAUDE.md"):
+    for cm in projects_root.rglob("CLAUDE.md"):
+        if any(part in SKIP_DIRS for part in cm.parts):
+            continue
         for surface in _scan_file(cm):
             found.setdefault(surface, []).append(str(cm))
     return found
