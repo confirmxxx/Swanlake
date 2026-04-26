@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swanlake-cli"
+version = "0.2.0"
+description = "Swanlake unified CLI — composite posture command consolidating reconciler, canary, exfil, content-safety, closure, coverage, and bench dimensions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Swanlake contributors" }]
+keywords = ["swanlake", "posture", "reconciler", "canary", "defense"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+]
+# Stdlib-only at runtime. tomllib is in 3.11+; argparse, fcntl, json, etc. are stdlib.
+dependencies = []
+
+[project.optional-dependencies]
+# Heavy benchmark stack. Pulled in only when the operator opts into bench --full.
+# Versions intentionally loose; v0.2 has bench --full as a stub anyway.
+bench = [
+  "pyrit>=0.5",
+  "garak>=0.9",
+]
+
+[project.scripts]
+swanlake = "swanlake.__main__:main"
+
+[tool.setuptools]
+# Both packages ship together. The reconciler keeps its own CLI entry point
+# (`python3 -m reconciler.cli`) so the existing systemd timer keeps working.
+packages = [
+  "swanlake",
+  "swanlake.commands",
+  "swanlake.commands.adapt",
+  "swanlake.adapters",
+  "swanlake.tests",
+  "reconciler",
+]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"swanlake.adapters" = [
+  "templates/cc/*.sh",
+  "templates/cc/SKILL.md",
+  "templates/cma/*.yaml",
+]
