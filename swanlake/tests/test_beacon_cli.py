@@ -51,17 +51,13 @@ class BeaconArgparseTest(unittest.TestCase):
 
 
 class BeaconStubDispatchTest(unittest.TestCase):
-    """Each stub returns NOT_IMPLEMENTED; verify dispatch reaches them."""
+    """Stubs not yet replaced return NOT_IMPLEMENTED; verify dispatch reaches them.
 
-    def test_list_stub_returns_not_implemented(self):
-        with patch("sys.stderr", io.StringIO()):
-            rc = cli.main(["beacon", "list"])
-        self.assertEqual(rc, NOT_IMPLEMENTED)
-
-    def test_sweep_stub_returns_not_implemented(self):
-        with patch("sys.stderr", io.StringIO()):
-            rc = cli.main(["beacon", "sweep"])
-        self.assertEqual(rc, NOT_IMPLEMENTED)
+    `list` and `sweep` landed in the B1+B2 commit, so they no longer return
+    NOT_IMPLEMENTED -- their own test modules cover behavior. The remaining
+    three (`deploy`, `checklist`, `verify`) are still stubs at this point in
+    the build sequence and will be replaced commit-by-commit.
+    """
 
     def test_deploy_stub_returns_not_implemented(self):
         with patch("sys.stderr", io.StringIO()):
