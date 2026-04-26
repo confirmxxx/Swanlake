@@ -303,5 +303,58 @@ class ConcurrencyLockTest(unittest.TestCase):
             self.assertIn("phrase", state["surfaces"]["alpha-one"])
 
 
+class VersionFlagTest(unittest.TestCase):
+    """`--version` is the contract surface that downstream consumers (e.g.
+    swanlake's beacon subprocess wrapper) gate on. Must exit 0 and print a
+    non-empty version string. Must work without touching ~/.swanlake/, the
+    registry, or the state file -- argparse's `version` action short-circuits
+    before any filesystem read."""
+
+    def test_version_flag_exits_zero(self):
+        result = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(
+            result.returncode, 0,
+            f"--version exited {result.returncode}; stdout={result.stdout!r}; "
+            f"stderr={result.stderr!r}",
+        )
+
+    def test_version_flag_prints_non_empty_version(self):
+        # argparse's `version` action writes the version line to stdout on
+        # Python 3.4+. Combined stdout+stderr handling tolerates accidental
+        # routing changes; the assertions here lock the user-visible
+        # contract: a recognisable script tag plus a non-empty version
+        # string with at least one digit.
+        result = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        printed = (result.stdout + result.stderr).strip()
+        self.assertTrue(printed, f"--version printed nothing; got {printed!r}")
+        self.assertIn("make-canaries.py", printed)
+        version_tail = printed.split("make-canaries.py", 1)[1].strip()
+        self.assertTrue(
+            version_tail, f"version tail empty after script tag; got {printed!r}",
+        )
+        self.assertTrue(
+            re.search(r"\d", version_tail),
+            f"version tail has no digit; got {version_tail!r}",
+        )
+
+    def test_module_exposes_version_constant(self):
+        """Direct import path must also expose __version__ so callers can
+        gate without subprocessing -- belt-and-braces against the CLI flag
+        getting renamed in a future refactor."""
+        self.assertTrue(hasattr(mc, "__version__"))
+        self.assertIsInstance(mc.__version__, str)
+        self.assertTrue(mc.__version__.strip())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

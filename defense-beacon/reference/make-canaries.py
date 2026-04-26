@@ -21,6 +21,7 @@ Usage:
     python3 make-canaries.py --list          # print surface -> canary mapping
     python3 make-canaries.py --rotate <id>   # force-regenerate one surface
     python3 make-canaries.py --surfaces a,b  # operate on a subset
+    python3 make-canaries.py --version       # print script version and exit
 """
 
 from __future__ import annotations
@@ -34,6 +35,13 @@ import secrets
 import string
 import sys
 from pathlib import Path
+
+# Script version. Bumped in lockstep with any change to the canary token
+# format, registry layout, or beacon emission contract that downstream
+# consumers (e.g. swanlake's beacon subprocess wrapper) need to gate on.
+# Surfaced via --version so callers can pin a minimum without resorting to
+# file-mtime, which `git checkout` bumps without changing content.
+__version__ = "1.1.0"
 
 HOME = Path(os.path.expanduser("~"))
 REPO_DIR = Path(__file__).resolve().parent
@@ -293,6 +301,14 @@ def _acquire_lock():
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Defense beacon canary generator")
+    # --version short-circuits before any state read or write so it works
+    # even when ~/.swanlake/ is missing or read-only. argparse handles
+    # the print + sys.exit(0) on its own when the action fires.
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"make-canaries.py {__version__}",
+    )
     p.add_argument("--list", action="store_true", help="Show surface -> canary mapping")
     p.add_argument("--rotate", default="", help="Comma-separated surface ids to rotate")
     p.add_argument("--surfaces", default="", help="Comma-separated subset to operate on")
