@@ -53,10 +53,9 @@ class BeaconArgparseTest(unittest.TestCase):
 class BeaconStubDispatchTest(unittest.TestCase):
     """Stubs not yet replaced return NOT_IMPLEMENTED; verify dispatch reaches them.
 
-    `list` and `sweep` landed in the B1+B2 commit, so they no longer return
-    NOT_IMPLEMENTED -- their own test modules cover behavior. The remaining
-    three (`deploy`, `checklist`, `verify`) are still stubs at this point in
-    the build sequence and will be replaced commit-by-commit.
+    `list`, `sweep`, and `verify` are implemented; their own test modules
+    cover behavior. `deploy` and `checklist` are still stubs at this point
+    in the build sequence and will be replaced commit-by-commit.
     """
 
     def test_deploy_stub_returns_not_implemented(self):
@@ -67,11 +66,6 @@ class BeaconStubDispatchTest(unittest.TestCase):
     def test_checklist_stub_returns_not_implemented(self):
         with patch("sys.stderr", io.StringIO()):
             rc = cli.main(["beacon", "checklist"])
-        self.assertEqual(rc, NOT_IMPLEMENTED)
-
-    def test_verify_stub_returns_not_implemented(self):
-        with patch("sys.stderr", io.StringIO()):
-            rc = cli.main(["beacon", "verify"])
         self.assertEqual(rc, NOT_IMPLEMENTED)
 
 
