@@ -9,7 +9,7 @@
 
 <callout icon="🟢" color="green_bg">
 	**PUBLIC OSS — v0.1 LIVE** — Defense-in-depth primitives for Claude Code and agentic applications. Apache 2.0. Branch-protected, signed-commits-only.
-	Repo: [github.com/confirmxxx/Swanlake](https://github.com/confirmxxx/Swanlake) · License: Apache-2.0 · Maintained by Tristar AGS
+	Repo: [github.com/confirmxxx/Swanlake](https://github.com/confirmxxx/Swanlake) · License: Apache-2.0
 </callout>
 
 Swanlake is the **Subroutine Layer**: a set of small, composable primitives that sit beneath an AI agent (whether the agent runs inside Claude Code on a developer machine or as an autonomous agent inside a production application). Turn on the primitives that address your specific threats; each addresses a specific attack class. None promise perfect defense.
@@ -125,4 +125,4 @@ Every proposed change is measured: did it produce a real hardening artifact with
 
 ---
 
-*Maintained by Tristar AGS. Auto-propagated from `canon/notion-template.md` via the security-watchdog Routine.*
+*Auto-propagated from `canon/notion-template.md` via the security-watchdog Routine.*
