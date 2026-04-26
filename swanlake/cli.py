@@ -103,6 +103,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the confirmation prompt.",
     )
+    sync_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Preview canon -> vault file paths and Notion page IDs that "
+            "would be touched without invoking the reconciler. Exit 0 "
+            "always; safe in CI/cron."
+        ),
+    )
     verify_p = sub.add_parser(
         "verify",
         help="Check which surfaces still hold intact beacons.",
