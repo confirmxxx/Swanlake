@@ -45,7 +45,7 @@ swanlake sync --yes              # skip the prompt (for cron / systemd timers)
 swanlake init                    # re-run the setup wizard (idempotent)
 ```
 
-The v0.1 entry points still ship as a transitional path — `python3 -m reconciler.cli --status / --sync / --init` works unchanged with a one-line stderr deprecation hint. See `../docs/migrating-from-v0.1.md`.
+The v0.1 entry points still ship as a transitional path — `python3 -m reconciler.cli --status / --sync / --init` works unchanged with a one-line stderr deprecation hint.
 
 `swanlake status` reports the reconciler row as one of:
 
