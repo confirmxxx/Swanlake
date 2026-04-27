@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import swanlake
 
 
-EXPECTED_VERSION = "0.4.1"
+EXPECTED_VERSION = "0.4.2"
 
 
 class VersionPinTest(unittest.TestCase):
