@@ -11,13 +11,49 @@ Top-level flags:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import Sequence
 
 from swanlake import __version__
+from swanlake import install_marker as _install_marker
 from swanlake import state as _state
 from swanlake.audit import AuditRecord
 from swanlake.exit_codes import USAGE
+
+
+def _maybe_warn_install_drift(argv: Sequence[str]) -> None:
+    """Print the install-drift warning to stderr if the runtime source
+    does not match ~/.swanlake/.install-marker.
+
+    Spec: docs/v0.3.x-worktree-install-isolation-spec.md T2.
+
+    Called BEFORE argparse so the warning still prints when argv
+    triggers an early-exit action (notably `--version`, which
+    SystemExits inside parse_args before _dispatch ever runs). The
+    check is silent on:
+      - missing marker (degrades-to-silent for pre-v0.3.x installs)
+      - cross-interpreter mismatch (multi-python hosts share the dir)
+      - --quiet anywhere in argv (no stderr noise in scripts)
+      - SWANLAKE_NO_INSTALL_DRIFT_WARN=1 (CI / intentional drift)
+      - any exception during the check itself (the warning must
+        never crash the CLI, even on a corrupt marker)
+    """
+    if "--quiet" in argv:
+        return
+    if os.environ.get(_install_marker.DRIFT_WARN_ENV) == "1":
+        return
+    try:
+        drift = _install_marker.check_drift()
+    except Exception:  # noqa: BLE001 — never crash CLI on warning path
+        return
+    if drift.get("status") != "drift":
+        return
+    try:
+        sys.stderr.write(_install_marker.format_drift_warning(drift))
+    except OSError:
+        # Closed/broken stderr (e.g. piped to a closed FD). Silently swallow.
+        pass
 
 
 SUBCOMMANDS = (
@@ -492,6 +528,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+
+    # Drift check runs BEFORE parse_args because `--version` and
+    # similar action='version' flags SystemExit during parse_args
+    # (before _dispatch is reached). Placing the check earlier means
+    # `swanlake --version` from a drifted install still warns.
+    _maybe_warn_install_drift(raw_argv)
+
     args = parser.parse_args(raw_argv)
 
     # Apply --state-root override before any subcommand handler runs so
