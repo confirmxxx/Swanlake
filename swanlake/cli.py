@@ -31,10 +31,12 @@ SUBCOMMANDS = (
     "adapt",
     "coverage",
     "beacon",
+    "reconciler",
 )
 
 ADAPT_TARGETS = ("cc", "cma", "sdk")
 BEACON_OPS = ("list", "sweep", "deploy", "checklist", "verify")
+RECONCILER_OPS = ("ack",)
 
 
 def _common_flags_parser() -> argparse.ArgumentParser:
@@ -369,6 +371,59 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip surfaces verified on or after this timestamp.",
     )
 
+    # reconciler: ack subcommand for remote-only sync surfaces.
+    # Lives on the unified CLI so operators have one entry point; the
+    # bare ``swanlake-reconciler`` script keeps its own --status/--sync/--init
+    # flags untouched for back-compat with the systemd timer.
+    recon_p = sub.add_parser(
+        "reconciler",
+        help="Reconciler ops (today: ack remote-only sync surfaces).",
+        parents=[common],
+    )
+    recon_sub = recon_p.add_subparsers(
+        dest="reconciler_op", metavar="<op>"
+    )
+    ack_p = recon_sub.add_parser(
+        "ack",
+        help=(
+            "Record an operator ack for a surface synced by a remote routine "
+            "(e.g. notion). Without this, the reconciler dim shows a "
+            "permanent `missing` ALARM because remote routines cannot "
+            "write the local last-sync.json."
+        ),
+        parents=[common],
+    )
+    ack_p.add_argument(
+        "surface",
+        metavar="SURFACE",
+        nargs="?",
+        default=None,
+        help="Surface name to ack (omit when using --all-remote).",
+    )
+    ack_p.add_argument(
+        "--since",
+        metavar="ISO-8601",
+        default=None,
+        help=(
+            "Claimed time the remote sync actually happened (default: now). "
+            "Accepts trailing Z or +00:00."
+        ),
+    )
+    ack_p.add_argument(
+        "--all-remote",
+        action="store_true",
+        help=(
+            "Ack every surface classified as `remote` (or alias `cloud`) in "
+            "~/.swanlake/config.toml [surfaces]. Defaults: notion is remote."
+        ),
+    )
+    ack_p.add_argument(
+        "--note",
+        metavar="TEXT",
+        default="",
+        help="Optional free-text note recorded with the ack.",
+    )
+
     return parser
 
 
@@ -419,6 +474,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     if cmd == "beacon":
         from swanlake.commands import beacon as beacon_cmd
         return beacon_cmd.run(args)
+    if cmd == "reconciler":
+        from swanlake.commands import reconciler as reconciler_cmd
+        return reconciler_cmd.run(args)
 
     # Defensive: unknown subcommand reached dispatch (should be caught by argparse).
     print(f"swanlake: unknown subcommand {cmd!r}", file=sys.stderr)
@@ -448,6 +506,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         subcmd = getattr(args, "coverage_op", None)
     elif cmd == "beacon":
         subcmd = getattr(args, "beacon_op", None)
+    elif cmd == "reconciler":
+        subcmd = getattr(args, "reconciler_op", None)
     else:
         subcmd = None
 
