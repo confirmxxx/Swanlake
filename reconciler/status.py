@@ -1,8 +1,8 @@
 """Status engine — drift detection across all surface classes.
 
-Reads ~/.config/swanlake-reconciler/last-sync.json (per-surface ISO
-timestamps written by sync engines). Classifies each surface by age
-vs current time. Severity ordering: fresh < drift < missing < drift-red.
+Reads ~/.swanlake/last-sync.json (per-surface ISO timestamps written
+by sync engines). Classifies each surface by age vs current time.
+Severity ordering: fresh < drift < missing < drift-red.
 `missing` is worse than `drift` (never synced is more concerning than
 stale-but-known); `drift-red` (stale > 7d) is worst.
 
@@ -13,6 +13,24 @@ freshness calculation only when it is fresher than the local sync
 timestamp; the most recent of (sync_ts, ack_ts) wins. Acks age out on
 the same windows as syncs, so a forgotten ack does NOT permanently
 mute the alarm.
+
+Path migration (v0.4.2)
+-----------------------
+``STATE_PATH`` was historically rooted at the legacy XDG location
+``~/.config/swanlake-reconciler/last-sync.json``. The unified state
+root (spec A3 / A11) is ``~/.swanlake/`` and the ack JSONL already
+lives there. Leaving ``STATE_PATH`` on the legacy path made
+``state_path.parent`` resolve to ``~/.config/swanlake-reconciler/``,
+which is NOT where ``reconciler.acks`` reads acks from -- so acks
+recorded via ``swanlake reconciler ack`` were silently invisible to
+``swanlake status``.
+
+This module now defaults ``STATE_PATH`` to the new location and runs
+a one-shot best-effort migration on first read: if the new file does
+not exist but the legacy one does, the legacy contents are copied
+forward. The legacy file is NOT deleted -- operators may have other
+tooling reading it, and the reconciler is not authoritative over
+files outside its own state root.
 """
 from __future__ import annotations
 
@@ -25,8 +43,11 @@ from pathlib import Path
 
 from reconciler import acks as _acks
 
-# Default state path; overridable via state_path arg in tests.
-STATE_PATH = Path.home() / '.config' / 'swanlake-reconciler' / 'last-sync.json'
+# Unified state root (spec A3 / A11). ``STATE_PATH`` is the active path.
+# The legacy XDG path is consulted only by the one-shot migration helper
+# below; once a new file exists there, the legacy file is never read again.
+STATE_PATH = Path.home() / '.swanlake' / 'last-sync.json'
+_LEGACY_STATE_PATH = Path.home() / '.config' / 'swanlake-reconciler' / 'last-sync.json'
 
 SURFACES = ('claude_md', 'notion', 'vault')
 
@@ -55,8 +76,78 @@ def _classify(synced_at: datetime | None, now: datetime) -> str:
     return 'drift-red'
 
 
+def _atomic_write_state(path: Path, text: str) -> None:
+    """Atomic write helper used by the legacy migration path.
+
+    Mirrors ``write_sync_timestamp``'s tempfile-in-same-dir + os.replace
+    pattern so a half-migrated file never lands on disk. Pulled out as
+    a free function (instead of reusing ``write_sync_timestamp``)
+    because the migration writes raw JSON bytes verbatim -- adding a
+    re-encode step would be a chance to corrupt the legacy contents.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=path.name + '.', suffix='.tmp', dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _maybe_migrate_legacy_state(state_path: Path) -> None:
+    """One-shot best-effort copy of the legacy state file forward.
+
+    Runs only when:
+      * ``state_path`` is the default ``STATE_PATH`` (we never migrate
+        an explicit override -- tests pass tempdirs and would not want
+        the operator's real legacy file leaking in)
+      * the new location does not exist yet
+      * the legacy location exists and is readable
+
+    The legacy file is left in place. Any error during migration is
+    swallowed silently: the read path falls back to "all-missing"
+    semantics, which is the safer behaviour than crashing the status
+    command on a flaky filesystem.
+    """
+    if state_path != STATE_PATH:
+        return
+    if state_path.exists():
+        return
+    if not _LEGACY_STATE_PATH.exists():
+        return
+    try:
+        legacy_text = _LEGACY_STATE_PATH.read_text(encoding='utf-8')
+    except OSError:
+        return
+    try:
+        # Validate it parses before we copy so we don't migrate junk.
+        json.loads(legacy_text)
+    except json.JSONDecodeError:
+        return
+    try:
+        _atomic_write_state(state_path, legacy_text)
+    except OSError:
+        # ENOSPC, EACCES, etc. -- migration is best-effort. Leave the
+        # legacy file alone; next status call will retry.
+        return
+
+
 def _read_state(state_path: Path) -> dict:
-    """Read sync-state JSON. Any failure → empty dict (treat as all-missing)."""
+    """Read sync-state JSON. Any failure → empty dict (treat as all-missing).
+
+    Triggers a one-shot migration from the legacy XDG path on first
+    read of the default state path. See ``_maybe_migrate_legacy_state``.
+    """
+    _maybe_migrate_legacy_state(state_path)
     try:
         return json.loads(state_path.read_text())
     except (FileNotFoundError, OSError, json.JSONDecodeError):
@@ -94,10 +185,15 @@ def compute_report(
     """
     now = datetime.now(timezone.utc)
     raw = _read_state(state_path)
-    # Default acks_state_root to state_path.parent so test isolation works.
-    # A custom state_path implies a custom state root for the whole reconciler
-    # including acks; without this, tests passing a tmp state_path silently
-    # read the operator's real ~/.swanlake/reconciler-acks.jsonl.
+    # Default acks_state_root to state_path.parent so the path remains
+    # internally consistent: in production STATE_PATH lives in
+    # ``~/.swanlake/`` so .parent matches ``reconciler.acks`` defaults
+    # (post-v0.4.2 migration). In tests, a tmp state_path is paired with
+    # a tmp acks dir of the same parent, which is the test-isolation
+    # invariant the v0.4.1 fix introduced. Pre-v0.4.2 the parent
+    # resolved to the LEGACY XDG dir, which silently broke production
+    # acks (see module docstring); the migration above is what makes
+    # this default safe.
     if acks_state_root is None:
         acks_state_root = state_path.parent
     ack_map = _acks.latest_acks(state_root=acks_state_root)
