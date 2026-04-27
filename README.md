@@ -47,7 +47,7 @@ Supporting documentation:
 
 - **Enforcement layer** — `swanlake scan` (per-project audit), SessionStart advisory nudge (opt-in via `swanlake adapt cc --enable-session-nudge`), and `swanlake init project --type {cc,cma}` for scaffolding fresh Swanlake-aware projects. Hard rule preserved: NOTHING auto-installs without explicit operator confirmation. See [`docs/v0.4-enforcement-spec.md`](./docs/v0.4-enforcement-spec.md).
 - **Worktree-install isolation** — install-marker at `~/.swanlake/.install-marker` self-detects + warns when `pip install -e .` from a sibling worktree captures the global install pointer. v0.4.1 self-heals on tarball-install transient build paths. New `swanlake doctor` 10th probe verifies marker matches runtime path. See [`docs/v0.3.x-worktree-install-isolation-spec.md`](./docs/v0.3.x-worktree-install-isolation-spec.md).
-- **Reconciler `ack` subcommand** — `swanlake reconciler ack <surface>` records that a remote-only sync (e.g. Notion via the watchdog routine) happened, clearing the persistent local-state ALARM that was architecturally correct but cosmetically noisy.
+- **Reconciler `ack` subcommand** — `swanlake reconciler ack <surface>` records that a remote-only sync (e.g. Notion via the watchdog routine) happened, clearing the persistent local-state ALARM that was architecturally correct but cosmetically noisy. v0.4.2 migrates `STATE_PATH` to `~/.swanlake/last-sync.json` so the ack-clears-status flow works end-to-end (legacy XDG path auto-migrates on first run).
 - **`swanlake beacon` family** (shipped v0.3) — `list`, `sweep`, `deploy`, `checklist`, `verify` with HARD LOCAL/REMOTE split (LOCAL under 12-step safety machine; REMOTE stays checklist-only by SPEC). See [`docs/v0.3-beacon-deploy-spec.md`](./docs/v0.3-beacon-deploy-spec.md).
 - **`.swanlake-no-beacon` opt-out marker** for excluding directories from sweep/deploy/scan. See [`docs/swanlake-no-beacon.md`](./docs/swanlake-no-beacon.md).
 - **39-finding edge-case audit** — permanent backlog at [`docs/edge-case-audit-2026-04-27.md`](./docs/edge-case-audit-2026-04-27.md). 7 quick-fixes already shipped including the canary-match UTC-date timezone bug.
@@ -107,10 +107,10 @@ Because a dashboard you have to open. A shield in your status line you see every
 
 ```bash
 # Recommended — pipx for full isolation (no worktree-install pollution)
-pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.4.1
+pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.4.2
 
 # Or frozen tarball
-pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archive/refs/tags/v0.4.1.tar.gz
+pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archive/refs/tags/v0.4.2.tar.gz
 
 # From source — development install only. With multiple git worktrees,
 # `pip install -e .` from a sibling worktree captures the global install
@@ -121,7 +121,7 @@ cd Swanlake
 pip install -e .
 ```
 
-`swanlake --version` prints `0.4.1`.
+`swanlake --version` prints `0.4.2`.
 
 > **Worktree-isolation note.** Editable installs share one global pointer per Python interpreter. If a background agent (or a parallel `git worktree`) runs `pip install -e .` against its own checkout, the operator's `swanlake` binary silently starts importing from that worktree. Swanlake v0.3.x+ records the install source under `~/.swanlake/.install-marker` and prints a one-line stderr warning the next time the CLI runs from a different source; v0.4.1 self-heals on transient pip-build paths. `swanlake doctor`'s 10th probe flags the same drift as a fail row. The hard fix is `pipx install swanlake-cli` — pipx puts the tool in its own venv, so any agent's `pip install -e .` inside a worktree affects only that agent's interpreter, never the operator's CLI. Full design rationale: [`docs/v0.3.x-worktree-install-isolation-spec.md`](./docs/v0.3.x-worktree-install-isolation-spec.md).
 
@@ -192,7 +192,7 @@ Auto-deploy to REMOTE surfaces (Notion, Supabase, Vercel, GitHub, Routines) is f
 **6. New machine.**
 
 ```bash
-pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.4.1 \
+pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.4.2 \
   && swanlake init \
   && swanlake adapt cc
 ```
@@ -374,7 +374,7 @@ Reference implementations are straightforward but have not accumulated productio
 
 ## Honesty audit log
 
-Last reviewed against the shipped CLI surface and behavior on **2026-04-27** for v0.4.1. Docs touched in that pass:
+Last reviewed against the shipped CLI surface and behavior on **2026-04-27** for **v0.4.2**. Docs touched in that pass:
 
 - `README.md`, `THREAT-MODEL.md`, `NON-GOALS.md`, `DEPENDENCIES.md`, `CONTRIBUTING.md`
 - `docs/v0.2-unified-cli-spec.md`, `docs/v0.3-beacon-deploy-spec.md`, `docs/swanlake-no-beacon.md`, `docs/how-this-fits-above-native-claude-code.md`, `docs/adversarial-research-pattern.md`, `docs/reflex-purity-pattern.md`
