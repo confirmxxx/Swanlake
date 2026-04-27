@@ -29,6 +29,7 @@ def _ns(**kw) -> Namespace:
         "quiet": False,
         "cmd": "sync",
         "yes": False,
+        "dry_run": False,
     }
     defaults.update(kw)
     return Namespace(**defaults)
@@ -127,6 +128,45 @@ class SyncConfirmGatingTest(unittest.TestCase):
              patch("sys.stdout", io.StringIO()):
             rc = sync_cmd.run(_ns(yes=True))
         self.assertEqual(rc, 1)
+
+    def test_sync_dry_run_does_not_call_reconciler(self):
+        """--dry-run prints a preview and never invokes the reconciler.
+
+        Bug #3: the v0.2.1 spec + the operator-facing skill assumed the
+        flag existed; v0.2.2 ships it. The contract:
+          - reconciler.sync_vault.run_sync_all is NOT called
+          - exit code is 0 (always; preview-failure surfaces in stdout)
+          - operator never sees a confirmation prompt
+        """
+        captured = io.StringIO()
+        called = []
+
+        def fake_run_sync_all():
+            called.append(True)
+            return 0
+
+        # No TTY, no --yes, no NONINTERACTIVE -- normal sync would exit 2
+        # USAGE here. --dry-run must short-circuit that gate too, since
+        # it touches nothing and is safe in any environment (cron, CI,
+        # the `swanlake-upd` flow that probes for the flag).
+        with patch("swanlake.commands.sync._is_tty", return_value=False), \
+             patch("reconciler.sync_vault.run_sync_all", side_effect=fake_run_sync_all), \
+             patch("builtins.input") as mock_input, \
+             patch("sys.stdout", captured):
+            rc = sync_cmd.run(_ns(yes=False, dry_run=True))
+
+        self.assertEqual(rc, 0, "--dry-run must exit 0 even when preview is degraded")
+        self.assertEqual(
+            called, [],
+            "reconciler.sync_vault.run_sync_all must not be called on --dry-run",
+        )
+        self.assertEqual(
+            mock_input.call_count, 0,
+            "--dry-run must never prompt the operator",
+        )
+        out = captured.getvalue()
+        self.assertIn("dry-run", out, "preview banner must mention dry-run")
+        self.assertIn("exit: 0", out, "preview must end with explicit exit 0 line")
 
 
 if __name__ == "__main__":

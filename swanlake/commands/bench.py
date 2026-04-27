@@ -80,23 +80,102 @@ def _write_last_bench() -> Path:
 
 
 def _resolve_script() -> Path | None:
+    """Locate bench/live-fire-rerun.sh.
+
+    Resolution order (first match wins):
+
+      1. ${SWANLAKE_REPO_ROOT}/bench/live-fire-rerun.sh -- explicit env override
+      2. _compat.find_repo_root() / bench/live-fire-rerun.sh -- install-path
+         based; works when bench is invoked from outside a clone (the spec's
+         primary failure mode for the operator-facing /swanlake-upd flow)
+      3. <cwd>/bench/live-fire-rerun.sh -- legacy CWD fallback for
+         pre-v0.2.2 callers that always invoked from inside a clone
+
+    Returns the first existing candidate, or None if all three miss.
+    `_resolve_script_with_attempts()` returns the same answer plus the
+    full list of attempts so the failure path can show the operator
+    every path that was tried.
+    """
+    script, _attempts = _resolve_script_with_attempts()
+    return script
+
+
+def _resolve_script_with_attempts() -> tuple[Path | None, list[Path]]:
+    """Return (resolved_path_or_None, list_of_attempted_paths).
+
+    Split out so the failure branch in _run_quick can render an error
+    that names every path tried -- the operator running bench from
+    outside a clone needs to know whether SWANLAKE_REPO_ROOT was the
+    fix, the install-path walk failed, or both.
+    """
+    attempts: list[Path] = []
+
+    # 1. Explicit env var override. Honored even if _compat would also
+    #    succeed -- the env var is the operator's deliberate signal.
+    env_root = os.environ.get("SWANLAKE_REPO_ROOT")
+    if env_root:
+        env_candidate = Path(env_root).expanduser() / LIVE_FIRE_REL
+        attempts.append(env_candidate)
+        if env_candidate.exists():
+            return env_candidate, attempts
+
+    # 2. Install-path-based via _compat.find_repo_root(). This is the
+    #    fix for the bug: when the operator runs `swanlake bench` from
+    #    outside any clone (e.g. `cd ~ && swanlake bench --quick`),
+    #    _compat walks up from the package install location and finds
+    #    the same checkout that ships the bench script.
     try:
         repo = _compat.find_repo_root()
     except _compat.CompatError:
-        return None
-    candidate = repo / LIVE_FIRE_REL
-    return candidate if candidate.exists() else None
+        repo = None
+    if repo is not None:
+        install_candidate = repo / LIVE_FIRE_REL
+        attempts.append(install_candidate)
+        if install_candidate.exists():
+            return install_candidate, attempts
+
+    # 3. Legacy CWD fallback. Pre-v0.2.2 the wrapper assumed the
+    #    operator was always inside a clone; preserve that for callers
+    #    that depend on it. Listed last so the install-path resolution
+    #    wins in the common case (matches the spec's intent: the bench
+    #    script's location should be resolvable via the install path,
+    #    not CWD).
+    cwd_candidate = Path.cwd() / LIVE_FIRE_REL
+    attempts.append(cwd_candidate)
+    if cwd_candidate.exists():
+        return cwd_candidate, attempts
+
+    return None, attempts
 
 
 def _run_quick(quiet: bool, json_out: bool) -> tuple[int, dict[str, Any]]:
     """Drive bench/live-fire-rerun.sh and return (rc, payload)."""
-    script = _resolve_script()
+    script, attempts = _resolve_script_with_attempts()
     if script is None:
-        eprint(
-            "swanlake bench --quick: cannot locate bench/live-fire-rerun.sh "
-            "(set SWANLAKE_REPO_ROOT or run from inside a Swanlake clone)"
-        )
-        return USAGE, {"error": "script_not_found"}
+        # Build a multi-line error that names every path tried so the
+        # operator can debug without re-reading the source. Stays on
+        # stderr so JSON consumers don't see noise.
+        lines = [
+            "swanlake bench --quick: cannot locate bench/live-fire-rerun.sh",
+            "tried (in order):",
+        ]
+        for i, p in enumerate(attempts, 1):
+            lines.append(f"  {i}. {p}")
+        if os.environ.get("SWANLAKE_REPO_ROOT"):
+            lines.append(
+                "hint: SWANLAKE_REPO_ROOT is set but the bench script is "
+                "not present at that path."
+            )
+        else:
+            lines.append(
+                "hint: set SWANLAKE_REPO_ROOT=/path/to/swanlake/clone, or "
+                "run from inside a Swanlake clone."
+            )
+        eprint("\n".join(lines))
+        return USAGE, {
+            "error": "script_not_found",
+            "attempts": [str(p) for p in attempts],
+        }
 
     try:
         # The script writes its own /tmp output file; we capture stdout
