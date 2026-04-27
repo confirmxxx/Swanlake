@@ -1,7 +1,9 @@
 """`swanlake doctor` -- per-primitive health check with fix suggestions.
 
-Spec MVP T5. Runs 8 probes against the local environment, prints a
-column-aligned table, and exits with the worst severity:
+Spec MVP T5 (extended by docs/v0.3.x-worktree-install-isolation-spec.md
+T3 to add the 10th install-marker probe). Runs 10 probes against the
+local environment, prints a column-aligned table, and exits with the
+worst severity:
     pass = 0
     warn = 1
     fail = 2
@@ -16,6 +18,8 @@ Probes (in display order):
   6. python3 on PATH       -- shutil.which('python3')
   7. gh available          -- shutil.which('gh') (warn-only)
   8. git available         -- shutil.which('git')
+  9. notion verify token   -- SWANLAKE_NOTION_TOKEN if any notion-* surface
+ 10. install-marker        -- ~/.swanlake/.install-marker matches runtime
 
 `--fix-suggestions` prints the exact one-liner fix per failing/warning
 row instead of a brief remediation line in the detail column.
@@ -36,6 +40,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from swanlake import _compat
+from swanlake import install_marker as _install_marker
 from swanlake import state as _state
 from swanlake.exit_codes import ALARM, CLEAN, DRIFT
 from swanlake.output import print_json, print_line, print_table
@@ -264,6 +269,70 @@ def _probe_notion_token() -> dict[str, Any]:
     }
 
 
+def _probe_install_marker() -> dict[str, Any]:
+    """Tenth probe: ~/.swanlake/.install-marker matches runtime source dir.
+
+    Spec: docs/v0.3.x-worktree-install-isolation-spec.md T3. Catches
+    the "background agent ran pip install -e . inside its worktree
+    and silently flipped the global editable pointer" failure mode
+    that motivated this spec.
+
+    Status mapping:
+      pass:  marker exists and matches runtime
+      pass:  marker written by a different python_executable
+             (multi-interpreter hosts legitimately share the state dir)
+      warn:  no marker (pre-v0.3.x install, or installed via a path
+             that bypassed the cmdclass hook)
+      fail:  marker exists and does NOT match runtime — likely
+             worktree-install drift; CLI is running from one source
+             but the operator's blessed install pointed at another
+    """
+    drift = _install_marker.check_drift()
+    status = drift.get("status")
+    runtime = drift.get("runtime_path") or "<unresolved>"
+    marker = drift.get("marker_path")
+
+    if status == "ok":
+        return {
+            "status": "pass",
+            "detail": f"{runtime}",
+            "fix": None,
+        }
+    if status == "cross-interpreter":
+        return {
+            "status": "pass",
+            "detail": (
+                f"marker by {drift.get('marker_python')!r}; "
+                f"running under {drift.get('runtime_python')!r} (multi-interpreter host)"
+            ),
+            "fix": None,
+        }
+    if status == "no-marker":
+        return {
+            "status": "warn",
+            "detail": (
+                "no install marker (pre-v0.3.x install, or installed "
+                "via a path that skipped the cmdclass hook)"
+            ),
+            "fix": (
+                f"pip install --force-reinstall {runtime} "
+                "(or migrate to pipx: pipx install swanlake-cli)"
+            ),
+        }
+    # status == "drift"
+    return {
+        "status": "fail",
+        "detail": (
+            f"runtime={runtime} marker={marker} "
+            "(likely worktree-install drift)"
+        ),
+        "fix": (
+            f"pip install --force-reinstall {runtime} "
+            "(or migrate to pipx: pipx install swanlake-cli)"
+        ),
+    }
+
+
 def _safe(fn: Callable[[], dict[str, Any]], name: str) -> dict[str, Any]:
     try:
         result = fn()
@@ -287,6 +356,7 @@ PROBES = (
     ("gh available", _probe_gh),
     ("git available", _probe_git),
     ("notion verify token", _probe_notion_token),
+    ("install-marker matches runtime", _probe_install_marker),
 )
 
 
