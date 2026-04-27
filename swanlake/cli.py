@@ -209,6 +209,41 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Register a single surface in coverage.json without re-running bootstrap.",
     )
+    init_sub = init_p.add_subparsers(dest="init_op", metavar="<op>")
+    init_project_p = init_sub.add_parser(
+        "project",
+        help="Scaffold a fresh Swanlake-aware project (cc or cma).",
+        parents=[common],
+    )
+    init_project_p.add_argument(
+        "target",
+        nargs="?",
+        default=".",
+        help="Target directory (default: current dir).",
+    )
+    init_project_p.add_argument(
+        "--type",
+        choices=("cc", "cma"),
+        required=True,
+        help="Project shape: cc (Claude Code) or cma (Claude Managed Agents).",
+    )
+    init_project_p.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite an existing target dir's contents. Refused by "
+            "default to prevent footgun against in-progress work."
+        ),
+    )
+    init_project_p.add_argument(
+        "--name",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Project name to embed in the rendered CLAUDE.md template "
+            "(default: basename of target dir)."
+        ),
+    )
 
     adapt_p = sub.add_parser(
         "adapt",
@@ -550,6 +585,12 @@ def _dispatch(args: argparse.Namespace) -> int:
         from swanlake.commands import doctor as doctor_cmd
         return doctor_cmd.run(args)
     if cmd == "init":
+        # `swanlake init project ...` routes to the v0.4 scaffold
+        # subcommand; bare `swanlake init` (with or without
+        # --add-surface) continues to bootstrap state.
+        if getattr(args, "init_op", None) == "project":
+            from swanlake.commands import init_project
+            return init_project.run(args)
         from swanlake.commands import init as init_cmd
         return init_cmd.run(args)
     if cmd == "adapt":
@@ -605,6 +646,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         subcmd = getattr(args, "beacon_op", None)
     elif cmd == "reconciler":
         subcmd = getattr(args, "reconciler_op", None)
+    elif cmd == "init":
+        subcmd = getattr(args, "init_op", None)
     else:
         subcmd = None
 
