@@ -68,6 +68,7 @@ SUBCOMMANDS = (
     "coverage",
     "beacon",
     "reconciler",
+    "scan",
 )
 
 ADAPT_TARGETS = ("cc", "cma", "sdk")
@@ -460,6 +461,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional free-text note recorded with the ack.",
     )
 
+    # scan: per-project audit of beacon + opt-out + CMA shape (v0.4 L1).
+    scan_p = sub.add_parser(
+        "scan",
+        help="Walk ~/projects/*; report per-project beacon / opt-out status.",
+        parents=[common],
+    )
+    scan_p.add_argument(
+        "--projects-root",
+        metavar="PATH",
+        default=None,
+        help="Override the projects root (default: ~/projects).",
+    )
+    scan_p.add_argument(
+        "--include-nested",
+        action="store_true",
+        help=(
+            "Walk the full tree under projects-root, not just immediate "
+            "children. Picks up monorepo / split-package layouts."
+        ),
+    )
+    scan_p.add_argument(
+        "--filter",
+        choices=("all", "actionable", "clean"),
+        default="all",
+        help=(
+            "Narrow the report: 'actionable' shows only deploy-beacon / "
+            "scaffold-cc / scaffold-cma rows; 'clean' shows only fully "
+            "beaconed projects."
+        ),
+    )
+
     return parser
 
 
@@ -513,6 +545,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     if cmd == "reconciler":
         from swanlake.commands import reconciler as reconciler_cmd
         return reconciler_cmd.run(args)
+    if cmd == "scan":
+        from swanlake.commands import scan as scan_cmd
+        return scan_cmd.run(args)
 
     # Defensive: unknown subcommand reached dispatch (should be caught by argparse).
     print(f"swanlake: unknown subcommand {cmd!r}", file=sys.stderr)
