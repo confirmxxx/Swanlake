@@ -43,12 +43,14 @@ Supporting documentation:
 | [`reconciler/README.md`](./reconciler/README.md) | Reconciler architecture overview + usage commands + divergence opt-out + status segment integration |
 | [`reconciler/OPERATOR-SETUP.md`](./reconciler/OPERATOR-SETUP.md) | Fresh-machine setup walkthrough (~10 min): clone, init canary registry, wizard, systemd timer, verify |
 
-## What's new in v0.2 (current)
+## What's new in v0.3 (current)
 
-- Unified `swanlake` CLI consolidating 7 scattered v0.1 entry points
-- CMA adapter — `swanlake adapt cma` installs Beacon Part A + per-CMA canaries + `zones.yaml`-driven tool allowlists + reflex-purity AST check
-- Composite `swanlake status` across 7 health dimensions; exits non-zero on drift
-- See [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md)
+- `swanlake beacon` family — `list`, `sweep`, `deploy`, `checklist`, `verify` close the manual-paste loop from v0.2 with a HARD LOCAL/REMOTE split (LOCAL deploy under a 12-step safety machine; REMOTE stays checklist-only by SPEC). See [`docs/v0.3-beacon-deploy-spec.md`](./docs/v0.3-beacon-deploy-spec.md).
+- `.swanlake-no-beacon` opt-out marker for excluding directories from sweep/deploy. See [`docs/swanlake-no-beacon.md`](./docs/swanlake-no-beacon.md).
+- `swanlake doctor` 9th probe checks `SWANLAKE_NOTION_TOKEN` is set if any `notion-*` surface is in coverage.
+- v0.2.2 fixes folded in: `__version__` accuracy, `swanlake sync --dry-run`, `swanlake bench` install-path resolution.
+
+All v0.2.x entry points and subcommands remain unchanged. v0.1 entry points keep working with stderr-only deprecation hints — see [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md).
 
 ## Where Swanlake fits in the agent immune system
 
@@ -97,27 +99,28 @@ Sync the shield's freshness signal from the Notion posture page via `tools/sync-
 
 Because a dashboard you have to open. A shield in your status line you see every time you glance at your terminal. Full cheat sheet + integration in [`tools/README.md`](./tools/README.md).
 
-## Operating Swanlake (v0.2 CLI)
+## Operating Swanlake (v0.3 CLI)
 
 ### Install
 
 ```bash
-# Recommended (PEP 668 compatible, isolated)
-pipx install swanlake-cli
+# Recommended — frozen tarball install (avoids editable-install / worktree-pollution drift)
+pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archive/refs/tags/v0.3.0.tar.gz
 
-# Or with a venv
-python3 -m venv .venv && source .venv/bin/activate
-pip install swanlake-cli
+# Or pipx for full isolation
+pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.3.0
 
-# From source (development install)
+# From source — development install only. With multiple git worktrees,
+# `pip install -e .` from a sibling worktree captures the global install
+# pointer; prefer the tarball install above for non-dev use.
 git clone https://github.com/confirmxxx/Swanlake.git
 cd Swanlake
 pip install -e .
 ```
 
-`swanlake --version` prints `0.2.0`.
+`swanlake --version` prints `0.3.0`.
 
-### The five workflows
+### The six workflows
 
 **1. Posture check.** `swanlake status` aggregates 7 dimensions (reconciler / canary / inject / exfil / closure / coverage / bench) and exits non-zero on drift.
 
@@ -165,21 +168,35 @@ Registers `NAME` in `~/.swanlake/coverage.json` without re-running the bootstrap
 **4. Adversarial smoke test.**
 
 ```bash
-swanlake bench --quick     # ~1 min; writes ISO-UTC to ~/.swanlake/last-bench
-swanlake bench --full      # v0.3 stub; exits 3 with a manual-fallback hint
+swanlake bench --quick     # ~1 min fixture-based smoke; writes ISO-UTC to ~/.swanlake/last-bench
+swanlake bench --full      # v0.4+ stub; PyRIT + Garak harness deferred. Currently exits 0 with a manual-fallback hint pointing at /tmp/swanlake-pyrit-garak-bench-*/run.sh.
 ```
 
-**5. New machine.**
+**5. Beacon deploy (LOCAL surfaces) + checklist (REMOTE surfaces).**
 
 ```bash
-pipx install swanlake-cli && swanlake init && swanlake adapt cc
+swanlake beacon list                 # 7 surface types + scope (local/remote) + deploy method
+swanlake beacon sweep                # find unbeaconed/partial surfaces; honors .swanlake-no-beacon opt-out
+swanlake beacon deploy <surface-id>  # 12-step LOCAL safety machine (clean-tree, backup, atomic write, post-status)
+swanlake beacon checklist            # paste-ready markdown for REMOTE surfaces; default stdout (no on-disk live-canary registry)
+swanlake beacon verify <surface-id>  # thin wrapper + 5-type REMOTE dispatch
+```
+
+Auto-deploy to REMOTE surfaces (Notion, Supabase, Vercel, GitHub, Routines) is forbidden by the threat model — the checklist is the deployment artifact. Drop a `.swanlake-no-beacon` file in any directory to exclude it from sweep/deploy; full semantics in [`docs/swanlake-no-beacon.md`](./docs/swanlake-no-beacon.md).
+
+**6. New machine.**
+
+```bash
+pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archive/refs/tags/v0.3.0.tar.gz \
+  && swanlake init \
+  && swanlake adapt cc
 ```
 
 Three commands from zero to wired.
 
 ### Migrating from v0.1
 
-v0.1 entry points keep working in v0.2 with stderr-only deprecation hints, so cron jobs and pipes that consume stdout are unaffected. Full translation table in [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md). Removal target is v0.3.
+v0.1 entry points keep working in v0.3 with stderr-only deprecation hints, so cron jobs and pipes that consume stdout are unaffected. Full translation table in [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md). The original v0.3 removal target slipped — v0.1 entry points still ship, but treat them as transitional and migrate at your convenience.
 
 ### Manual install / customization (fallback)
 
@@ -212,7 +229,7 @@ Each package's README has the full walkthrough.
 swanlake adapt cma --project PATH
 ```
 
-Works today against any project that has a `cmas/` or `agents/` directory of per-CMA markdown/yaml files (configurable via `--cma-glob`). For each CMA the adapter:
+Validated against synthetic CMA-shape fixtures only; **first live-project install is operator follow-up work**. The adapter operates against any project that has a `cmas/` or `agents/` directory of per-CMA markdown/yaml files (configurable via `--cma-glob`). For each CMA the adapter:
 
 - Injects Beacon Part A operating rules into the CMA's system prompt
 - Generates per-CMA Part B canaries on first install (preserved on re-run)
@@ -222,17 +239,19 @@ Works today against any project that has a `cmas/` or `agents/` directory of per
 
 Uninstall via `swanlake adapt cma --project PATH --uninstall` reverses everything from the per-project manifest at `~/.swanlake/cma-adapter-manifest-<project>.json`.
 
+Do not read this as "Swanlake secures CMA-based agentic systems in production." The CMA adapter is the install primitive; production hardening is the operator's job.
+
 ### Anthropic SDK
 
 ```bash
 swanlake adapt sdk
 ```
 
-Stub in v0.2; v0.3 work, gated on a real SDK adopter. Exits 3 with a "deferred to v0.3" message.
+Stub in v0.3; gated on a real SDK adopter. Exits 3 with a deferred-stub message.
 
 ### Node
 
-Out of scope for v0.2. Each package's `SPEC.md` is implementation-language-agnostic; Node operators can implement against the spec and file issues when gaps appear.
+Out of scope for v0.3. Each package's `SPEC.md` is implementation-language-agnostic; Node operators can implement against the spec and file issues when gaps appear.
 
 ## Compatibility with native Claude Code
 
@@ -266,4 +285,14 @@ Apache 2.0. Copyright (c) 2026 confirmxxx. See `LICENSE` and `NOTICE`.
 
 ## Status
 
-Pre-1.0. v0.2 ships the unified CLI plus CC and CMA adapters; SDK adapter and full PyRIT/Garak bench harness are v0.3 work. Spec-stable for the primitives documented here. Use in production at your discretion — reference implementations are straightforward but have not accumulated battle-testing outside the maintainer's own deployments.
+Pre-1.0, no third-party adopters yet. v0.3 ships the `swanlake beacon` deploy/sweep family on top of the v0.2 unified CLI, plus the CC and CMA adapters. The SDK adapter is a deferred stub; the `--full` PyRIT/Garak bench harness is a v0.4+ stub. Spec-stable for the primitives documented here.
+
+Reference implementations are straightforward but have not accumulated production exposure outside the maintainer's own deployments. Hook templates installed by `swanlake adapt cc` are minimal demos (~30-60 LOC each) that exercise the contract — they are not drop-in replacements for a hardened production hook stack. Treat them as starting skeletons and harden per your own threat model. Reflex-purity is a report-only AST check; wiring it as a CI gate is an operator decision.
+
+## Honesty audit log
+
+Last reviewed against the shipped CLI surface and behavior on **2026-04-26** for v0.3.0. Docs touched in that pass:
+
+- `README.md`, `THREAT-MODEL.md`, `NON-GOALS.md`, `DEPENDENCIES.md`, `CONTRIBUTING.md`
+- `docs/migrating-from-v0.1.md`, `docs/v0.2-unified-cli-spec.md`, `docs/v0.3-beacon-deploy-spec.md`, `docs/swanlake-no-beacon.md`, `docs/how-this-fits-above-native-claude-code.md`, `docs/adversarial-research-pattern.md`, `docs/reflex-purity-pattern.md`
+- `defense-beacon/README.md`, `trust-zones/README.md`, `reflex-purity/README.md`, `reconciler/README.md`, `experiments/white-cells/README.md`, `tools/README.md`, `defense-beacon/examples/synthetic-saas/README.md`
