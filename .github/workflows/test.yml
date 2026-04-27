@@ -36,7 +36,7 @@ jobs:
       - name: white-cells — Phase 2/3 unit + e2e tests
         run: python3 experiments/white-cells/tests/test_white_cells_phase_2_3.py
 
-      - name: reconciler — divergence + status + sync + cli + init tests
+      - name: reconciler — divergence + status + sync + cli + init + ack tests
         run: |
           python3 reconciler/tests/test_cli.py
           python3 reconciler/tests/test_divergence.py
@@ -44,3 +44,4 @@ jobs:
           python3 reconciler/tests/test_sync_vault.py
           python3 reconciler/tests/test_sync_notion.py
           python3 reconciler/tests/test_init.py
+          python3 reconciler/tests/test_ack.py

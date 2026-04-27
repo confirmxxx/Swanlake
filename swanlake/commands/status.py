@@ -69,8 +69,24 @@ def _safe(fn: Callable[[], dict[str, Any]], name: str) -> dict[str, Any]:
 # --- Dimension implementations ---
 
 
+def _format_age_compact(age_hours: float) -> str:
+    """Compact age string: minutes < 1h, hours < 48h, days otherwise."""
+    if age_hours < 1:
+        minutes = max(int(age_hours * 60), 1)
+        return f"{minutes}m"
+    if age_hours < 48:
+        return f"{age_hours:.0f}h"
+    return f"{age_hours / 24:.1f}d"
+
+
 def _dim_reconciler() -> dict[str, Any]:
-    """Reconciler drift across vault / claude_md / notion surfaces."""
+    """Reconciler drift across vault / claude_md / notion surfaces.
+
+    Acks (recorded via ``swanlake reconciler ack``) are folded into the
+    underlying ``compute_report`` so a remote-only surface (today:
+    notion) shows ``ack 5m ago (remote routine)`` instead of the false
+    ``missing`` ALARM the local-only sync model produces by default.
+    """
     from reconciler import status as recon_status
 
     report = recon_status.compute_report()
@@ -80,18 +96,30 @@ def _dim_reconciler() -> dict[str, Any]:
     for s in ("notion", "claude_md", "vault"):
         d = surfaces.get(s, {}) or {}
         st = d.get("status", "missing")
-        if st == "fresh":
-            detail_parts.append(f"{s}: fresh")
-        elif st == "missing":
+        via = d.get("synced_via")
+        age = d.get("age_hours")
+        if st == "missing":
             detail_parts.append(f"{s}: missing")
-        else:
-            age = d.get("age_hours")
-            if age is None:
-                detail_parts.append(f"{s}: {st}")
-            elif age < 48:
-                detail_parts.append(f"{s}: {age:.0f}h")
+            continue
+        if st == "fresh":
+            if via == "ack":
+                # Compact "ack Xm ago (remote routine)" surfaces the source.
+                if age is None:
+                    detail_parts.append(f"{s}: ack (remote routine)")
+                else:
+                    detail_parts.append(
+                        f"{s}: ack {_format_age_compact(age)} ago (remote routine)"
+                    )
             else:
-                detail_parts.append(f"{s}: {age / 24:.1f}d")
+                detail_parts.append(f"{s}: fresh")
+            continue
+        # drift / drift-red rendering keeps the existing compact form.
+        if age is None:
+            detail_parts.append(f"{s}: {st}")
+        elif age < 48:
+            detail_parts.append(f"{s}: {age:.0f}h")
+        else:
+            detail_parts.append(f"{s}: {age / 24:.1f}d")
     # reconciler severity -> our vocabulary
     status_word = {
         "fresh": "clean",

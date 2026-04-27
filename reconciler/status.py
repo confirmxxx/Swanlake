@@ -5,6 +5,14 @@ timestamps written by sync engines). Classifies each surface by age
 vs current time. Severity ordering: fresh < drift < missing < drift-red.
 `missing` is worse than `drift` (never synced is more concerning than
 stale-but-known); `drift-red` (stale > 7d) is worst.
+
+Also reads ~/.swanlake/reconciler-acks.jsonl (per-surface operator
+acks) for surfaces that are synced by remote routines outside the
+reconciler's reach (notion, today). An ack is folded into the
+freshness calculation only when it is fresher than the local sync
+timestamp; the most recent of (sync_ts, ack_ts) wins. Acks age out on
+the same windows as syncs, so a forgotten ack does NOT permanently
+mute the alarm.
 """
 from __future__ import annotations
 
@@ -14,6 +22,8 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from reconciler import acks as _acks
 
 # Default state path; overridable via state_path arg in tests.
 STATE_PATH = Path.home() / '.config' / 'swanlake-reconciler' / 'last-sync.json'
@@ -63,18 +73,58 @@ def _parse_timestamp(value: str | None) -> datetime | None:
         return None
 
 
-def compute_report(state_path: Path = STATE_PATH) -> dict:
-    """Return {'surfaces': {name: {'status', 'last_sync_utc', 'age_hours'}}, 'overall': str}."""
+def compute_report(
+    state_path: Path = STATE_PATH,
+    acks_state_root: Path | None = None,
+) -> dict:
+    """Return per-surface freshness folded with operator acks.
+
+    Each surface entry carries:
+      - ``status``: fresh/drift/missing/drift-red (severity bucket)
+      - ``last_sync_utc``: ISO timestamp of the most recent local sync (or None)
+      - ``last_ack_utc``: ISO timestamp of the most recent operator ack (or None)
+      - ``synced_via``: ``"sync"`` or ``"ack"`` — which signal the freshness
+        bucket above is computed against. ``None`` when neither exists.
+      - ``age_hours``: age of whichever signal won, in hours (or None)
+
+    Acks are read from ``~/.swanlake/reconciler-acks.jsonl`` (overridable
+    via ``acks_state_root`` for tests). The fresher of (sync_ts, ack_ts)
+    wins. Acks decay on the same FRESH/DRIFT windows as syncs, so a
+    forgotten ack still goes red instead of permanently muting the alarm.
+    """
     now = datetime.now(timezone.utc)
     raw = _read_state(state_path)
+    ack_map = _acks.latest_acks(state_root=acks_state_root)
     surfaces: dict[str, dict] = {}
     for s in SURFACES:
         synced = _parse_timestamp(raw.get(s))
-        st = _classify(synced, now)
+        ack = ack_map.get(s)
+        ack_ts = ack.synced_at if ack is not None else None
+
+        # Fresher of (sync, ack) wins. None values lose to anything real.
+        if synced is None and ack_ts is None:
+            winning_ts: datetime | None = None
+            via: str | None = None
+        elif synced is None:
+            winning_ts = ack_ts
+            via = 'ack'
+        elif ack_ts is None:
+            winning_ts = synced
+            via = 'sync'
+        elif ack_ts >= synced:
+            winning_ts = ack_ts
+            via = 'ack'
+        else:
+            winning_ts = synced
+            via = 'sync'
+
+        st = _classify(winning_ts, now)
         surfaces[s] = {
             'status': st,
             'last_sync_utc': synced.isoformat() if synced else None,
-            'age_hours': (now - synced).total_seconds() / 3600 if synced else None,
+            'last_ack_utc': ack_ts.isoformat() if ack_ts else None,
+            'synced_via': via,
+            'age_hours': (now - winning_ts).total_seconds() / 3600 if winning_ts else None,
         }
     overall = max(
         (surfaces[s]['status'] for s in SURFACES),
@@ -87,12 +137,17 @@ def run_status() -> int:
     """CLI entry: print human-readable report. Exit 0=fresh, 1=drift, 2=missing/drift-red."""
     report = compute_report()
     print(f"swanlake-reconciler status — overall: {report['overall']}")
-    print(f"{'surface':<12} {'status':<12} {'last sync (UTC)':<32} {'age':<8}")
+    print(f"{'surface':<12} {'status':<12} {'via':<6} {'last signal (UTC)':<32} {'age':<8}")
     for s in SURFACES:
         d = report['surfaces'][s]
-        last = d['last_sync_utc'] or '-'
+        via = d.get('synced_via') or '-'
+        # Show whichever timestamp won the freshness calculation.
+        if via == 'ack':
+            last = d['last_ack_utc'] or '-'
+        else:
+            last = d['last_sync_utc'] or '-'
         age = f'{d["age_hours"]:.1f}h' if d['age_hours'] is not None else '-'
-        print(f'{s:<12} {d["status"]:<12} {last:<32} {age:<8}')
+        print(f'{s:<12} {d["status"]:<12} {via:<6} {last:<32} {age:<8}')
     return {'fresh': 0, 'drift': 1, 'missing': 2, 'drift-red': 2}[report['overall']]
 
 
