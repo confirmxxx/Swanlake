@@ -110,8 +110,13 @@ Routine should:
 1. Fetch the latest `canon/notion-template.md` from the Swanlake repo
 2. Use the Notion MCP `notion-update-page` to write content into the
    master page (page ID = `notion_master_page_id` from your local config)
-3. Append an ISO timestamp to `~/.config/swanlake-reconciler/last-sync.json`
-   under key `notion`
+3. Append an ISO timestamp to `~/.swanlake/last-sync.json` under key
+   `notion` (or, more conveniently, run `swanlake reconciler ack notion`
+   from the operator's machine after each Routine fire — that writes the
+   ack to `~/.swanlake/reconciler-acks.jsonl` and the status reader folds
+   it into the freshness calculation). Pre-v0.4.2 installs that wrote to
+   `~/.config/swanlake-reconciler/last-sync.json` keep working: the
+   status engine migrates the legacy file forward on first read.
 
 After the next Routine fire (Sundays 09:00 UTC by default),
 `swanlake-reconciler --status` should show `notion` as `fresh`.
