@@ -107,7 +107,12 @@ rec = {
 
 log_dir = Path(os.environ['LOG_DIR'])
 log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+# UTC date so the file matches what status-segment.py and the test harness
+# both look up (`date -u +%Y-%m-%d`). Local time would put hits into the
+# wrong bucket whenever local TZ differs from UTC -- broke the canary_match
+# test harness on EDT machines after midnight UTC. (E38 in the 2026-04-27
+# edge-case audit.)
+log_file = log_dir / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
 with open(log_file, 'a') as f:
     f.write(json.dumps(rec, ensure_ascii=False) + '\n')
 
