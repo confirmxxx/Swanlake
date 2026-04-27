@@ -23,6 +23,20 @@ Three things:
 
 ## How to use it
 
+The v0.3 path: drive the loop from the unified CLI.
+
+```bash
+swanlake beacon list                 # 7 surface types + scope (local/remote) + deploy method
+swanlake beacon sweep                # find unbeaconed/partial surfaces; honors .swanlake-no-beacon opt-out
+swanlake beacon deploy <surface-id>  # 12-step LOCAL safety machine for project CLAUDE.md + vault notes
+swanlake beacon checklist            # paste-ready markdown for REMOTE surfaces (Notion / Supabase / Vercel / GitHub / Routines)
+swanlake beacon verify <surface-id>  # thin wrapper + 5-type REMOTE dispatch
+```
+
+LOCAL deploys are git-tracked and reversible (clean-tree pre-flight, file backup before write, atomic replace, post-write `git status` echoed back). REMOTE deploys are checklist-only by SPEC — see `docs/v0.3-beacon-deploy-spec.md` for the threat-model reasoning.
+
+The manual reference path below stays supported. Operators who don't want to use the CLI can still drive each step by hand.
+
 ### 1. Generate your per-surface outputs
 
 Edit `reference/surfaces.example.yaml` to list the surfaces you want to cover. Copy to `surfaces.yaml` (the generator reads this; `surfaces.example.yaml` is a template). Then:
