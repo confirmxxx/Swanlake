@@ -247,6 +247,25 @@ def build_parser() -> argparse.ArgumentParser:
             "wants the skill on top."
         ),
     )
+    cc_p.add_argument(
+        "--enable-session-nudge",
+        action="store_true",
+        help=(
+            "Drop the v0.4 SessionStart advisory hook into "
+            "~/.claude/hooks/ and wire it into settings.json's "
+            "SessionStart bucket. The hook prints one stderr line on "
+            "session start if the project has CLAUDE.md but no beacon "
+            "attribution and no opt-out marker. Always exits 0."
+        ),
+    )
+    cc_p.add_argument(
+        "--disable-session-nudge",
+        action="store_true",
+        help=(
+            "Reverse --enable-session-nudge: remove the SessionStart "
+            "hook script and drop its settings.json entry. Manifest-aware."
+        ),
+    )
     cma_p = adapt_sub.add_parser(
         "cma",
         help="Install Beacon Part A + zones into a CMA project.",

@@ -58,8 +58,13 @@ include-package-data = true
 [tool.setuptools.package-data]
 "swanlake.adapters" = [
   "templates/cc/*.sh",
+  "templates/cc/hooks/*.sh",
   "templates/cc/skills/*/SKILL.md",
   "templates/cma/*.yaml",
+  "templates/init/cc/*",
+  "templates/init/cc/canon/*.md",
+  "templates/init/cma/*",
+  "templates/init/cma/canon/*.md",
 ]
 
 [tool.setuptools.exclude-package-data]

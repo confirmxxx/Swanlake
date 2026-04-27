@@ -51,6 +51,14 @@ HOOK_NAMES = (
 SKILLS_REL = Path("skills")
 MANIFEST_FILENAME = "cc-adapter-manifest.json"
 
+# v0.4 L2 SessionStart nudge hook -- opt-in via --enable-session-nudge.
+# Lives under templates/cc/hooks/ (sibling subdir, not the flat list of
+# v0.2 hooks above) so the spec's "ships as a template script that the
+# operator opts into" property is structural: the file is not part of
+# the default install plan.
+SESSION_NUDGE_HOOK_NAME = "swanlake-session-nudge.sh"
+SESSION_NUDGE_EVENT = "SessionStart"
+
 # Mapping of hook script -> the settings.json hook event it should be
 # wired into. The operator's full taxonomy is richer; we install the
 # minimum the templates need.
@@ -65,6 +73,11 @@ HOOK_EVENT = {
 def _templates_dir() -> Path:
     """Resolve the templates dir bundled with the swanlake package."""
     return Path(__file__).resolve().parents[2] / "adapters" / "templates" / "cc"
+
+
+def _session_nudge_template() -> Path:
+    """Resolve the bundled session-nudge hook script source path."""
+    return _templates_dir() / "hooks" / SESSION_NUDGE_HOOK_NAME
 
 
 def _skills_templates_dir() -> Path:
@@ -589,6 +602,253 @@ class ClaudeCodeAdapter(Adapter):
             pass
         return CLEAN
 
+    # --- v0.4 L2 SessionStart nudge enable / disable ---
+
+    def session_nudge_path(self) -> Path:
+        """Where the SessionStart hook script lives post-install."""
+        return self.hooks_dir / SESSION_NUDGE_HOOK_NAME
+
+    def enable_session_nudge(self, dry_run: bool = False) -> int:
+        """Drop the SessionStart hook script + patch settings.json.
+
+        Idempotent: re-enabling on an already-installed nudge writes
+        nothing if the script is byte-identical to the template AND
+        the settings.json entry already references it.
+
+        Manifest-aware: tracks the install under
+        manifest['session_nudge'] = {'path': <abs>, 'event': 'SessionStart'}
+        so disable_session_nudge() can reverse exactly what was added.
+        """
+        if not self.cc_dir.exists():
+            eprint(
+                f"swanlake adapt cc --enable-session-nudge: {self.cc_dir} "
+                "does not exist. Install Claude Code first."
+            )
+            return USAGE
+        src = _session_nudge_template()
+        if not src.is_file():
+            eprint(
+                f"swanlake adapt cc --enable-session-nudge: bundled hook "
+                f"template missing at {src}. This is a packaging bug."
+            )
+            return USAGE
+
+        dst = self.session_nudge_path()
+        content = src.read_text(encoding="utf-8")
+
+        if dry_run:
+            if not dst.exists():
+                print_line(f"would: install SessionStart hook  -> {dst}", quiet=False)
+            elif dst.read_text(encoding="utf-8") != content:
+                print_line(f"would: update SessionStart hook  -> {dst}", quiet=False)
+            else:
+                print_line(f"would: noop SessionStart hook (byte-identical)  {dst}", quiet=False)
+            print_line(
+                f"would: patch settings.json hooks.{SESSION_NUDGE_EVENT} "
+                f"-> {dst}",
+                quiet=False,
+            )
+            return CLEAN
+
+        manifest = _read_manifest(self.manifest_path)
+        installed: list[dict[str, Any]] = list(manifest.get("installed") or [])
+        modified: list[dict[str, Any]] = list(manifest.get("modified") or [])
+
+        # Drop the script.
+        self.hooks_dir.mkdir(parents=True, exist_ok=True)
+        if dst.exists() and dst.read_text(encoding="utf-8") == content:
+            # Byte-identical -- no rewrite, no backup.
+            pass
+        else:
+            if dst.exists():
+                backup = dst.with_name(f"{dst.name}.bak-swanlake-{_ts_suffix()}")
+                shutil.copy2(dst, backup)
+                modified.append({
+                    "kind": "session-nudge-overwritten",
+                    "path": str(dst),
+                    "backup": str(backup),
+                })
+            _atomic_write(dst, content, mode=0o755)
+
+        # Track under both the legacy installed list (so the existing
+        # manifest-driven uninstall sweeps it on a full uninstall) and
+        # under a dedicated session_nudge key (so the targeted disable
+        # path knows what to drop).
+        if not any(i.get("path") == str(dst) for i in installed):
+            installed.append({"kind": "session-nudge", "path": str(dst)})
+
+        # Patch settings.json.
+        settings_added: list[dict[str, str]] = list(
+            manifest.get("settings_added") or []
+        )
+        if self.settings_path.exists():
+            try:
+                settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                eprint(
+                    f"swanlake adapt cc --enable-session-nudge: "
+                    f"{self.settings_path} is unreadable; skipping settings patch."
+                )
+                settings = None
+        else:
+            settings = {}
+
+        if isinstance(settings, dict):
+            command = str(dst)
+            if _patch_settings(
+                settings, SESSION_NUDGE_EVENT, command, dst
+            ):
+                if not any(
+                    a.get("event") == SESSION_NUDGE_EVENT
+                    and a.get("command") == command
+                    for a in settings_added
+                ):
+                    settings_added.append({
+                        "event": SESSION_NUDGE_EVENT,
+                        "command": command,
+                    })
+                # Backup settings.json before overwrite (only when changed).
+                backup = self.settings_path.with_name(
+                    f"{self.settings_path.name}.bak-swanlake-{_ts_suffix()}"
+                )
+                if self.settings_path.exists():
+                    shutil.copy2(self.settings_path, backup)
+                    modified.append({
+                        "kind": "settings",
+                        "path": str(self.settings_path),
+                        "backup": str(backup),
+                    })
+                _atomic_write(
+                    self.settings_path,
+                    json.dumps(settings, sort_keys=True, indent=2) + "\n",
+                )
+
+        manifest["installed"] = installed
+        manifest["modified"] = modified
+        manifest["settings_added"] = settings_added
+        manifest["session_nudge"] = {
+            "path": str(dst),
+            "event": SESSION_NUDGE_EVENT,
+        }
+        manifest["installed_at"] = datetime.now(timezone.utc).isoformat()
+        _write_manifest(self.manifest_path, manifest)
+
+        return CLEAN
+
+    def disable_session_nudge(self, dry_run: bool = False) -> int:
+        """Reverse enable_session_nudge: drop the script + settings entry.
+
+        Manifest-aware: only removes what enable_session_nudge() recorded
+        under manifest['session_nudge']. The other hooks + skills
+        installed by a regular `swanlake adapt cc` are untouched.
+        """
+        manifest = _read_manifest(self.manifest_path)
+        nudge = manifest.get("session_nudge") or {}
+        nudge_path_str = nudge.get("path") or ""
+        nudge_event = nudge.get("event") or SESSION_NUDGE_EVENT
+
+        # Best-effort fallback: even if the manifest never recorded a
+        # session_nudge entry, derive the expected path so a stale
+        # install (e.g. operator hand-deleted the manifest) can still
+        # be cleaned up by the disable verb.
+        if not nudge_path_str:
+            nudge_path_str = str(self.session_nudge_path())
+
+        nudge_path = Path(nudge_path_str)
+
+        if dry_run:
+            if nudge_path.exists():
+                print_line(f"would remove: {nudge_path}", quiet=False)
+            print_line(
+                f"would drop settings entry: hooks.{nudge_event} -> "
+                f"{nudge_path}",
+                quiet=False,
+            )
+            return CLEAN
+
+        # Drop the settings.json entry first so the operator's session
+        # is never left pointing at a missing hook script.
+        if self.settings_path.exists():
+            try:
+                settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                eprint(
+                    f"swanlake adapt cc --disable-session-nudge: "
+                    f"{self.settings_path} is unreadable; skipping settings cleanup."
+                )
+                settings = None
+            if isinstance(settings, dict):
+                hooks_root = settings.get("hooks")
+                if isinstance(hooks_root, dict):
+                    bucket = hooks_root.get(nudge_event)
+                    if isinstance(bucket, list):
+                        new_bucket = [
+                            entry for entry in bucket
+                            if not (
+                                isinstance(entry, dict)
+                                and any(
+                                    isinstance(h, dict)
+                                    and h.get("command") == str(nudge_path)
+                                    for h in (entry.get("hooks") or [])
+                                )
+                            )
+                        ]
+                        if new_bucket:
+                            hooks_root[nudge_event] = new_bucket
+                        else:
+                            del hooks_root[nudge_event]
+                        if not hooks_root:
+                            del settings["hooks"]
+                _atomic_write(
+                    self.settings_path,
+                    json.dumps(settings, sort_keys=True, indent=2) + "\n",
+                )
+
+        # Drop the script.
+        if nudge_path.exists():
+            try:
+                nudge_path.unlink()
+            except OSError as e:
+                eprint(
+                    f"swanlake adapt cc --disable-session-nudge: cannot "
+                    f"remove {nudge_path}: {e}"
+                )
+
+        # Trim the manifest. Keep other entries intact -- this verb is
+        # session-nudge-scoped only.
+        installed = [
+            e for e in (manifest.get("installed") or [])
+            if not (
+                e.get("kind") == "session-nudge"
+                and e.get("path") == str(nudge_path)
+            )
+        ]
+        settings_added = [
+            a for a in (manifest.get("settings_added") or [])
+            if not (
+                a.get("event") == nudge_event
+                and a.get("command") == str(nudge_path)
+            )
+        ]
+        manifest["installed"] = installed
+        manifest["settings_added"] = settings_added
+        if "session_nudge" in manifest:
+            del manifest["session_nudge"]
+
+        if (
+            not manifest.get("installed")
+            and not manifest.get("modified")
+            and not manifest.get("settings_added")
+        ):
+            try:
+                self.manifest_path.unlink()
+            except OSError:
+                pass
+        else:
+            _write_manifest(self.manifest_path, manifest)
+
+        return CLEAN
+
     # --- verify / list_surfaces ---
 
     def verify(self) -> Iterable[AdapterVerifyResult]:
@@ -621,9 +881,31 @@ def run(args) -> int:
     quiet = bool(getattr(args, "quiet", False))
     cc_dir = getattr(args, "cc_dir", None)
     skill_only = bool(getattr(args, "skill_only", False))
+    enable_nudge = bool(getattr(args, "enable_session_nudge", False))
+    disable_nudge = bool(getattr(args, "disable_session_nudge", False))
     adapter = ClaudeCodeAdapter(
         cc_dir=Path(cc_dir).expanduser() if cc_dir else None
     )
+
+    if enable_nudge and disable_nudge:
+        eprint(
+            "swanlake adapt cc: --enable-session-nudge and "
+            "--disable-session-nudge are mutually exclusive."
+        )
+        return USAGE
+
+    # v0.4 L2: targeted enable/disable verbs short-circuit the regular
+    # install/uninstall flow. They never touch the v0.2 hooks/skills the
+    # operator may already have installed.
+    if enable_nudge:
+        return adapter.enable_session_nudge(
+            dry_run=getattr(args, "dry_run", False),
+        )
+    if disable_nudge:
+        return adapter.disable_session_nudge(
+            dry_run=getattr(args, "dry_run", False),
+        )
+
     if getattr(args, "uninstall", False):
         return adapter.uninstall(
             dry_run=getattr(args, "dry_run", False),
