@@ -120,6 +120,8 @@ pip install -e .
 
 `swanlake --version` prints `0.3.0`.
 
+> **Worktree-isolation note for `pip install -e .` users.** Editable installs share one global pointer per Python interpreter. If a background agent (or a parallel `git worktree`) runs `pip install -e .` against its own checkout, the operator's `swanlake` binary silently starts importing from that worktree — version, exit codes, hook scripts and all. Swanlake v0.3.x records the install source under `~/.swanlake/.install-marker` and prints a one-line stderr warning the next time the CLI runs from a different source. `swanlake doctor` flags the same drift as a fail row. The hard fix is `pipx install swanlake-cli` (recommended above) — pipx puts the tool in its own venv, so any agent's `pip install -e .` inside a worktree affects only that agent's interpreter, never the operator's CLI. Full design rationale and risk register: [`docs/v0.3.x-worktree-install-isolation-spec.md`](./docs/v0.3.x-worktree-install-isolation-spec.md).
+
 ### The six workflows
 
 **1. Posture check.** `swanlake status` aggregates 7 dimensions (reconciler / canary / inject / exfil / closure / coverage / bench) and exits non-zero on drift.
