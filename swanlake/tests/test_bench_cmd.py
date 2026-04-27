@@ -174,7 +174,16 @@ class BenchFullStubTest(unittest.TestCase):
         with patch("sys.stdout", captured):
             rc = bench_cmd.run(_ns(full=True))
         self.assertEqual(rc, 3)
-        self.assertIn("not implemented", captured.getvalue())
+        out = captured.getvalue()
+        self.assertIn("not implemented", out)
+        # v0.4.1: message must reflect the current major (v0.4) and the
+        # honest forward-pointer (v0.5+). Earlier wording referenced v0.2
+        # and a stale /tmp/swanlake-pyrit-garak-bench-* path that never
+        # actually existed in this layout — pin the new framing so we
+        # don't silently regress to it.
+        self.assertIn("v0.4", out)
+        self.assertIn("v0.5+", out)
+        self.assertIn("PyRIT/Garak", out)
 
 
 class BenchResolveScriptTest(unittest.TestCase):

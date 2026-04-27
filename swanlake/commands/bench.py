@@ -5,11 +5,13 @@ On clean (rc=0) exit, writes the current ISO-UTC timestamp to
 ~/.swanlake/last-bench so `swanlake status`'s bench dimension picks
 it up.
 
-`--full` is intentionally a stub for v0.2: the PyRIT + Garak harness
-runs out-of-tree at /tmp/swanlake-pyrit-garak-bench-* per the spec, and
-wiring it into the CLI is deferred until the harness is more stable.
-Returns NOT_IMPLEMENTED (3) so the operator can distinguish "feature
-missing" from a real benchmark failure.
+`--full` is intentionally a stub through v0.4 (planned for v0.5+):
+wiring an in-tree PyRIT + Garak harness into the CLI is deferred
+until the upstream harnesses stabilise enough that we can pin a
+useful version. Returns NOT_IMPLEMENTED (3) so the operator can
+distinguish "feature missing" from a real benchmark failure; the
+operator is free to drive their own standalone PyRIT/Garak harness
+in the meantime.
 
 Pass/fail counts are extracted from the script's stdout. The script
 emits `[N] <slug>  <verdict>  http=...  bytes=...` lines; we count
@@ -223,8 +225,9 @@ def run(args) -> int:
 
     if full:
         msg = (
-            "swanlake bench --full not implemented in v0.2 -- run "
-            "/tmp/swanlake-pyrit-garak-bench-*/run.sh manually"
+            "swanlake bench --full not implemented in v0.4 (planned for "
+            "v0.5+) -- run a standalone PyRIT/Garak harness manually if "
+            "you have one"
         )
         if json_out:
             print_json(
