@@ -47,10 +47,11 @@ Types:
 - `sec` — security fix. Use for anything addressing a vulnerability, with a description that does not prematurely disclose exploitation detail
 
 Scopes for this repo:
-- `beacon` — Defense Beacon package
+- `beacon` — Defense Beacon package, the v0.3 `swanlake beacon` deploy/sweep family, and the canon canary pipeline
 - `zones` — Trust Zones package
 - `purity` — Reflex Purity package
 - `cli` — `swanlake/` unified CLI package + its `pyproject.toml` entry point
+- `recon` — `reconciler/` package + canon sync
 - `docs` — docs/ root
 - `root` — repo-level files (README, LICENSE, etc.)
 

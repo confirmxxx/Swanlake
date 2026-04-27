@@ -35,15 +35,19 @@ not shared.
 
 ## Usage
 
-After running `--init` once on a fresh machine:
+The v0.3 path: drive the reconciler from the unified CLI. After running `swanlake init` once on a fresh machine:
 
 ```bash
-swanlake-reconciler --status   # show per-surface sync state
-swanlake-reconciler --sync     # force re-sync of all surfaces (one-shot)
-swanlake-reconciler --init     # re-run the setup wizard
+swanlake status                  # composite report; reconciler row shows per-surface sync state
+swanlake sync                    # confirmation-gated re-sync of all surfaces ([y/N] prompt)
+swanlake sync --dry-run          # preview which page IDs and which blocks will change
+swanlake sync --yes              # skip the prompt (for cron / systemd timers)
+swanlake init                    # re-run the setup wizard (idempotent)
 ```
 
-`--status` reports each surface as one of:
+The v0.1 entry points still ship as a transitional path — `python3 -m reconciler.cli --status / --sync / --init` works unchanged with a one-line stderr deprecation hint. See `../docs/migrating-from-v0.1.md`.
+
+`swanlake status` reports the reconciler row as one of:
 
 | State | Meaning |
 |---|---|

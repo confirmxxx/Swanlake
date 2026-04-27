@@ -42,6 +42,12 @@ Offensive tooling — adversarial prompt generation, attack-corpus runners, evas
 
 Swanlake is defensive. Red-team tools belong alongside, not inside.
 
+## Not an auto-deploy mechanism for remote surfaces
+
+`swanlake beacon` does not auto-deploy canaries to Notion, Supabase env vars, Vercel env vars, GitHub repos, or Claude Routines. By SPEC: a deploy credential (Notion token, Supabase service-role key, Vercel API token, GitHub PAT, Routines token) is a single point of compromise that lets an attacker silently rotate canaries to attacker-known values, after which every exfiltration of a "canary" passes detection. The cheapest defense is to never have such a credential.
+
+LOCAL surfaces (project `CLAUDE.md`, vault notes) are auto-deployable behind a 12-step safety machine because the blast radius is bounded by `git diff` and reversible by `git checkout`. REMOTE surfaces stay checklist-only; `swanlake beacon checklist` emits paste-ready markdown the operator pastes by hand. See [`docs/v0.3-beacon-deploy-spec.md`](./docs/v0.3-beacon-deploy-spec.md) §10 for the full hard-NO list.
+
 ## Not a managed service
 
 There is no hosted Swanlake. There is no dashboard service. The reference implementations run on your machine, and the canary registry lives on your machine. This is a design decision, not an oversight: a cloud-hosted canary registry is a centralized attack surface that defeats the local-attribution guarantee.

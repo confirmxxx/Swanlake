@@ -30,9 +30,16 @@ What Swanlake defends against, what it does not, the honesty problem, and where 
 | Model-level jailbreaks that exploit tokenizer quirks or attention failures | Below the agent layer | Model-vendor's native defenses (Anthropic Opus 4.5 RL training, classifier layer) |
 | Platform-level compromise of the Claude Code binary or hook scripts | Operator's host is trusted | Integrity hashing the agent pack; native `ConfigChange` hook; standard supply-chain hygiene |
 | Upstream supply-chain compromise (e.g. injected npm dependency) | Build-time, not runtime | Lockfile discipline, audit tooling (npm audit, socket.dev), SBOM |
-| Determined compromise of the beacon itself | Attacker with write access to a surface can strip or forge the beacon | Cross-surface divergence monitoring — verify monthly that beacon text survived on every surface, using `verify-beacons.py` |
+| Determined compromise of the beacon itself | Attacker with write access to a surface can strip or forge the beacon | Cross-surface divergence monitoring — verify monthly that beacon text survived on every surface, using `swanlake verify` / `swanlake beacon verify` |
 | Operator mistakes | Rules bind the agent, not the human | Training, dual-control for destructive operations |
 | Image-derived OCR injection | Swanlake does not OCR | Pair with OCR + content-safety at the application layer |
+| Auto-deploy of canaries to REMOTE surfaces (Notion, Supabase, Vercel, GitHub, Routines) | Forbidden by SPEC: a deploy credential is a single point of compromise that lets an attacker silently rotate canaries to attacker-known values; cheapest defense is to never have such a credential | `swanlake beacon checklist` emits a paste-ready markdown the operator pastes by hand; `swanlake beacon verify` checks remote presence read-only |
+
+## Scope of the CMA adapter
+
+The `swanlake adapt cma` subcommand is **validated against synthetic CMA-shape fixtures only; first live-project install is operator follow-up work**. The adapter installs Beacon Part A + per-CMA Part B canaries, applies `zones.yaml`-driven tool allowlists, and runs a report-only reflex-purity AST check. None of that is the same as "Swanlake secures CMA-based agentic systems in production." Production CMA hardening is the operator's job; the adapter is the install primitive.
+
+The reflex-purity AST check exits 0 even on violations — the report is information, not a gate. Wiring it as a hard CI gate is an operator decision.
 
 ## Why the canary registry must stay local
 
