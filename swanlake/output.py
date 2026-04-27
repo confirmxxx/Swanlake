@@ -19,11 +19,25 @@ def print_json(obj: Any, quiet: bool = False, fp=None) -> None:
 
     sort_keys=True so machine consumers get stable output across runs.
     Honors quiet by no-op-ing the write.
+
+    `default=str` coerces values that json.dump cannot natively serialise
+    (e.g. Path objects, datetime). When sort_keys=True hits a dict that
+    mixes str and non-str keys, the comparison would raise TypeError; we
+    fall back to a non-sorted dump so a defensive caller still gets
+    output rather than an unhandled exception. (E18 in the 2026-04-27
+    edge-case audit.)
     """
     if quiet:
         return
     out = fp if fp is not None else sys.stdout
-    json.dump(obj, out, sort_keys=True, indent=2, default=str)
+    try:
+        json.dump(obj, out, sort_keys=True, indent=2, default=str)
+    except TypeError:
+        # Mixed-key-type dict somewhere in the tree -- json.dump tries
+        # to sort and raises. Re-dump without sort_keys so the operator
+        # still sees their data; insertion order is preserved (CPython
+        # dict invariant since 3.7).
+        json.dump(obj, out, indent=2, default=str)
     out.write("\n")
 
 

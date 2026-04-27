@@ -107,7 +107,13 @@ def _check_routines_export_stale(spec: str) -> str | None:
     """
     duration = _parse_duration_seconds(spec)
     if duration is None:
-        return f"--remind-export-stale: bad duration {spec!r} (use e.g. 30d, 12h, 15m)"
+        # E25: enumerate accepted units explicitly so the operator who
+        # types `30s` or `1w` sees what is allowed rather than a vague
+        # "bad duration". Format strictly matches _DURATION_RE.
+        return (
+            f"--remind-export-stale: bad duration {spec!r} "
+            "(format: <int>(d|h|m), lowercase; e.g. 30d, 12h, 15m)"
+        )
     export_path = _state.state_path("routines-export.json")
     if not export_path.exists():
         return (

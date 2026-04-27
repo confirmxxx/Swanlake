@@ -283,7 +283,11 @@ class ChecklistStalenessTest(ChecklistBaseTest):
              ), patch("sys.stdout", io.StringIO()), \
              patch("sys.stderr", captured_err):
             cl_cmd.run(_ns(remind_export_stale="bogus"))
-        self.assertIn("bad duration", captured_err.getvalue())
+        err = captured_err.getvalue()
+        self.assertIn("bad duration", err)
+        # E25: error must enumerate the accepted units explicitly so the
+        # operator who typoed `30s` / `1w` knows what is allowed.
+        self.assertIn("d|h|m", err)
 
 
 class ChecklistTemplateTest(unittest.TestCase):
