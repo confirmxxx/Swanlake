@@ -1,0 +1,19 @@
+# .swanlake-no-beacon -- example opt-out marker (NOT active by default).
+#
+# To activate: rename this file to `.swanlake-no-beacon` (drop the .example
+# suffix). Once active, the file excludes this directory and every
+# descendant from `swanlake beacon sweep`, `swanlake beacon deploy`,
+# `swanlake scan`, and the SessionStart nudge hook.
+#
+# Two flavors:
+#
+#   1. Empty file -- exclude everything below this directory.
+#   2. YAML frontmatter `surfaces: [<id>, <id>]` -- exclude only the
+#      listed surface-ids in this subtree.
+#
+# Example for the surface-list flavor:
+#
+#     surfaces: [cms-scratch-foo, cms-scratch-bar]
+#
+# See docs/swanlake-no-beacon.md in the swanlake repo for full
+# semantics.

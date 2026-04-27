@@ -68,6 +68,7 @@ SUBCOMMANDS = (
     "coverage",
     "beacon",
     "reconciler",
+    "scan",
 )
 
 ADAPT_TARGETS = ("cc", "cma", "sdk")
@@ -208,6 +209,41 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Register a single surface in coverage.json without re-running bootstrap.",
     )
+    init_sub = init_p.add_subparsers(dest="init_op", metavar="<op>")
+    init_project_p = init_sub.add_parser(
+        "project",
+        help="Scaffold a fresh Swanlake-aware project (cc or cma).",
+        parents=[common],
+    )
+    init_project_p.add_argument(
+        "target",
+        nargs="?",
+        default=".",
+        help="Target directory (default: current dir).",
+    )
+    init_project_p.add_argument(
+        "--type",
+        choices=("cc", "cma"),
+        required=True,
+        help="Project shape: cc (Claude Code) or cma (Claude Managed Agents).",
+    )
+    init_project_p.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite an existing target dir's contents. Refused by "
+            "default to prevent footgun against in-progress work."
+        ),
+    )
+    init_project_p.add_argument(
+        "--name",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Project name to embed in the rendered CLAUDE.md template "
+            "(default: basename of target dir)."
+        ),
+    )
 
     adapt_p = sub.add_parser(
         "adapt",
@@ -244,6 +280,25 @@ def build_parser() -> argparse.ArgumentParser:
             "skill; skip hook scripts and settings.json patching. Use "
             "when the operator runs their own production hooks and only "
             "wants the skill on top."
+        ),
+    )
+    cc_p.add_argument(
+        "--enable-session-nudge",
+        action="store_true",
+        help=(
+            "Drop the v0.4 SessionStart advisory hook into "
+            "~/.claude/hooks/ and wire it into settings.json's "
+            "SessionStart bucket. The hook prints one stderr line on "
+            "session start if the project has CLAUDE.md but no beacon "
+            "attribution and no opt-out marker. Always exits 0."
+        ),
+    )
+    cc_p.add_argument(
+        "--disable-session-nudge",
+        action="store_true",
+        help=(
+            "Reverse --enable-session-nudge: remove the SessionStart "
+            "hook script and drop its settings.json entry. Manifest-aware."
         ),
     )
     cma_p = adapt_sub.add_parser(
@@ -460,6 +515,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional free-text note recorded with the ack.",
     )
 
+    # scan: per-project audit of beacon + opt-out + CMA shape (v0.4 L1).
+    scan_p = sub.add_parser(
+        "scan",
+        help="Walk ~/projects/*; report per-project beacon / opt-out status.",
+        parents=[common],
+    )
+    scan_p.add_argument(
+        "--projects-root",
+        metavar="PATH",
+        default=None,
+        help="Override the projects root (default: ~/projects).",
+    )
+    scan_p.add_argument(
+        "--include-nested",
+        action="store_true",
+        help=(
+            "Walk the full tree under projects-root, not just immediate "
+            "children. Picks up monorepo / split-package layouts."
+        ),
+    )
+    scan_p.add_argument(
+        "--filter",
+        choices=("all", "actionable", "clean"),
+        default="all",
+        help=(
+            "Narrow the report: 'actionable' shows only deploy-beacon / "
+            "scaffold-cc / scaffold-cma rows; 'clean' shows only fully "
+            "beaconed projects."
+        ),
+    )
+
     return parser
 
 
@@ -499,6 +585,12 @@ def _dispatch(args: argparse.Namespace) -> int:
         from swanlake.commands import doctor as doctor_cmd
         return doctor_cmd.run(args)
     if cmd == "init":
+        # `swanlake init project ...` routes to the v0.4 scaffold
+        # subcommand; bare `swanlake init` (with or without
+        # --add-surface) continues to bootstrap state.
+        if getattr(args, "init_op", None) == "project":
+            from swanlake.commands import init_project
+            return init_project.run(args)
         from swanlake.commands import init as init_cmd
         return init_cmd.run(args)
     if cmd == "adapt":
@@ -513,6 +605,9 @@ def _dispatch(args: argparse.Namespace) -> int:
     if cmd == "reconciler":
         from swanlake.commands import reconciler as reconciler_cmd
         return reconciler_cmd.run(args)
+    if cmd == "scan":
+        from swanlake.commands import scan as scan_cmd
+        return scan_cmd.run(args)
 
     # Defensive: unknown subcommand reached dispatch (should be caught by argparse).
     print(f"swanlake: unknown subcommand {cmd!r}", file=sys.stderr)
@@ -551,6 +646,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         subcmd = getattr(args, "beacon_op", None)
     elif cmd == "reconciler":
         subcmd = getattr(args, "reconciler_op", None)
+    elif cmd == "init":
+        subcmd = getattr(args, "init_op", None)
     else:
         subcmd = None
 
