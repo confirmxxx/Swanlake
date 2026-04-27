@@ -1,32 +1,33 @@
-# Migrating from Swanlake v0.1 to v0.2
+# Migrating from Swanlake v0.1 to v0.2 / v0.3
 
 ## What changed
 
-v0.1 shipped seven entry points across two repos: three reconciler subcommands, two `tools/` scripts, two `DEFENSE-BEACON/` scripts, four hook shell files, and one ad-hoc bench script under `/tmp/`. Operators kept the paths in muscle memory or in a personal cheat sheet. v0.2 introduces one CLI — `swanlake` — that wraps all of it. The underlying scripts still exist and still work; the CLI is a typed harness over them.
+v0.1 shipped seven entry points across two repos: three reconciler subcommands, two `tools/` scripts, two `DEFENSE-BEACON/` scripts, four hook shell files, and one ad-hoc bench script under `/tmp/`. Operators kept the paths in muscle memory or in a personal cheat sheet. v0.2 introduces one CLI — `swanlake` — that wraps all of it. v0.3 adds the `swanlake beacon` deploy/sweep family on top. The underlying scripts still exist and still work; the CLI is a typed harness over them.
 
-Nothing breaks. v0.1 entry points keep functioning in v0.2 with a one-line stderr deprecation hint. They are removed in v0.3.
+Nothing breaks. v0.1 entry points keep functioning in v0.2 and v0.3 with a one-line stderr deprecation hint. The original "removed in v0.3" target slipped — they still ship as a transitional path; treat them as deprecated and migrate at your convenience.
 
 ## Command translation
 
-| v0.1 | v0.2 | Removed in v0.3? |
+| v0.1 | v0.2 / v0.3 | Status as of v0.3.0 |
 |---|---|---|
-| `python3 -m reconciler.cli --status` | `swanlake status` | yes |
-| `python3 -m reconciler.cli --sync` | `swanlake sync` | yes |
-| `python3 -m reconciler.cli --init` | `swanlake init` | yes |
-| `python3 tools/status-segment.py` | invoked by status-line; `swanlake status` for full view | yes (kept as library shim) |
-| `python3 tools/loop-closure-metric.py` | folded into `swanlake status` (closure row); standalone via `swanlake status --json` | yes (kept as library shim) |
-| `python3 DEFENSE-BEACON/make-canaries.py` | `swanlake rotate` | the script stays; CLI wraps it |
-| `python3 DEFENSE-BEACON/verify-beacons.py` | `swanlake verify` | the script stays; CLI wraps it |
-| `~/.claude/hooks/canary-match.sh` (manual install) | installed by `swanlake adapt cc` | no — still bash |
-| `~/.claude/hooks/content-safety-check.sh` (manual install) | installed by `swanlake adapt cc` | no — still bash |
-| `~/.claude/hooks/bash-firewall.sh` (manual install) | installed by `swanlake adapt cc` | no — still bash |
-| `~/.claude/hooks/exfil-monitor.sh` (manual install) | installed by `swanlake adapt cc` | no — still bash |
-| `/tmp/swanlake-ab-bench-*/run.sh` | `swanlake bench --quick` | yes |
-| `/tmp/swanlake-pyrit-garak-bench-*/run.sh` | `swanlake bench --full` (v0.2.x) | yes |
+| `python3 -m reconciler.cli --status` | `swanlake status` | both work; v0.1 path emits stderr deprecation hint |
+| `python3 -m reconciler.cli --sync` | `swanlake sync` | both work; v0.1 path emits stderr deprecation hint |
+| `python3 -m reconciler.cli --init` | `swanlake init` | both work; v0.1 path emits stderr deprecation hint |
+| `python3 tools/status-segment.py` | invoked by status-line; `swanlake status` for full view | both work (kept as library shim) |
+| `python3 tools/loop-closure-metric.py` | folded into `swanlake status` (closure row); standalone via `swanlake status --json` | both work (kept as library shim) |
+| `python3 DEFENSE-BEACON/make-canaries.py` | `swanlake rotate` | both work; CLI wraps the script via subprocess |
+| `python3 DEFENSE-BEACON/verify-beacons.py` | `swanlake verify` / `swanlake beacon verify` | both work; CLI wraps the script |
+| `~/.claude/hooks/canary-match.sh` (manual install) | installed by `swanlake adapt cc` | still bash; templates installed by adapter are minimal demos |
+| `~/.claude/hooks/content-safety-check.sh` (manual install) | installed by `swanlake adapt cc` | still bash; templates installed by adapter are minimal demos |
+| `~/.claude/hooks/bash-firewall.sh` (manual install) | installed by `swanlake adapt cc` | still bash; templates installed by adapter are minimal demos |
+| `~/.claude/hooks/exfil-monitor.sh` (manual install) | installed by `swanlake adapt cc` | still bash; templates installed by adapter are minimal demos |
+| `/tmp/swanlake-ab-bench-*/run.sh` | `swanlake bench --quick` | both work |
+| `/tmp/swanlake-pyrit-garak-bench-*/run.sh` | `swanlake bench --full` | `--full` is a v0.4+ stub; falls back to manual `/tmp/...` script with a hint |
+| n/a (v0.3 new) | `swanlake beacon list / sweep / deploy / checklist / verify` | additive; closes the manual paste-and-pray loop for LOCAL surfaces, emits checklists for REMOTE |
 
 ## Backwards compatibility
 
-Every v0.1 entry point still runs in v0.2 unmodified. The reconciler module prints a single deprecation line to stderr at the top of each invocation:
+Every v0.1 entry point still runs in v0.2 and v0.3 unmodified. The reconciler module prints a single deprecation line to stderr at the top of each invocation:
 
 ```
 $ python3 -m reconciler.cli --status
@@ -41,11 +42,19 @@ The deprecation hint goes to stderr only, so existing pipes and cron jobs that c
 
 ## Installing the CLI
 
+Recommended (frozen-tarball install, avoids editable-install / worktree-pollution drift):
+
 ```bash
-pip install swanlake-cli
+pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archive/refs/tags/v0.3.0.tar.gz
 ```
 
-On Debian/Ubuntu and other PEP 668 systems, the system Python rejects `pip install` with an `externally-managed-environment` error. Use a venv: `python3 -m venv .venv && source .venv/bin/activate && pip install -e .`. Or `pipx install swanlake-cli` if you prefer isolated tool installs.
+Or with `pipx` for full isolation:
+
+```bash
+pipx install git+https://github.com/confirmxxx/Swanlake.git@v0.3.0
+```
+
+On Debian/Ubuntu and other PEP 668 systems, the system Python rejects `pip install` with an `externally-managed-environment` error — use one of the two paths above (the `--break-system-packages` form is intentional for a single-user install of an operator tool; `pipx` is the cleaner option). `pip install -e .` from a clone is supported for development; with multiple git worktrees, the editable install captures the global pointer to whichever worktree was installed last, so prefer the frozen-tarball or pipx paths for non-dev use.
 
 ## State migration
 
@@ -71,7 +80,7 @@ Healthy output ends with `posture: ok` and exit code 0. If `coverage.json` is em
 
 ## Rollback
 
-To uninstall v0.2 and return to v0.1 entry points:
+To uninstall the v0.2/v0.3 CLI and return to v0.1 entry points:
 
 ```bash
 # 1. Uninstall the CLI
@@ -94,7 +103,7 @@ mv ~/.claude/settings.json.bak-swanlake-<timestamp> ~/.claude/settings.json
 Only on the two reconciler-managed pages declared in your `~/.swanlake/config.toml` (`notion_master_page_id` and `notion_posture_page_id`). Every other Notion page in your workspace is invisible to Swanlake. The `--dry-run` flag prints exactly which page IDs and which blocks will change before any write.
 
 **Do I have to install the CLI to keep using v0.1?**
-No. v0.1 entry points keep working unmodified through v0.2. The CLI is a convenience wrapper, not a dependency. If you skip the install, the only thing you lose is the consolidated `swanlake status` view; every individual script remains usable.
+No. v0.1 entry points keep working unmodified through v0.2 and v0.3. The CLI is a convenience wrapper, not a dependency. If you skip the install, the only thing you lose is the consolidated `swanlake status` view (and the new v0.3 `swanlake beacon` deploy/sweep family); every individual script remains usable.
 
 **What about my existing systemd timer?**
 The v0.1 timer at `~/.config/systemd/user/swanlake-vault-sync.timer` keeps working — it invokes `python3 -m reconciler.cli --sync`, which still exists. If you want to migrate, the v0.2 equivalent unit calls `swanlake sync --yes` instead:
@@ -118,7 +127,7 @@ Reload with `systemctl --user daemon-reload && systemctl --user restart swanlake
 No. `swanlake init` creates new files in `~/.swanlake/` if absent and leaves anything that already exists untouched. `swanlake adapt cc` writes to `~/.claude/settings.json` after writing a timestamped backup of the original. No v0.1 script under `tools/`, `reconciler/`, or `DEFENSE-BEACON/` is modified.
 
 **My CI calls `python3 -m reconciler.cli --sync`. Does it break?**
-No. It keeps working through v0.2 with the stderr deprecation hint. Migrate at your convenience by replacing the call with `swanlake sync --yes` and adding `pip install swanlake-cli` to the CI image. Plan to migrate before v0.3 cuts (target: Q3 2026).
+No. It keeps working through v0.2 and v0.3 with the stderr deprecation hint. Migrate at your convenience by replacing the call with `swanlake sync --yes` and adding the v0.3 install to the CI image. The original v0.3 removal target slipped — the v0.1 path is still supported, but treat it as transitional.
 
 **Where does `swanlake` look for the canon source?**
 The `canon_dir` field in `~/.swanlake/config.toml`, defaulting to `<swanlake_repo_path>/canon/`. Both paths are written by `swanlake init`. Override at runtime with `--state-root PATH` or by editing the config file.
