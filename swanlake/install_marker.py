@@ -51,6 +51,22 @@ from typing import Any, Optional
 MARKER_FILENAME = ".install-marker"
 DRIFT_WARN_ENV = "SWANLAKE_NO_INSTALL_DRIFT_WARN"
 
+# Prefixes pip uses for the transient build/extract dirs it creates while
+# installing from a tarball / VCS / sdist. The setuptools cmdclass hook
+# fires from that transient dir (because that's where setup.py lives at
+# install time), so the marker captures a path that pip will delete the
+# instant the install finishes. Recognising these prefixes lets the
+# drift check distinguish "marker points at a long-gone build dir
+# (false positive)" from "marker points at a stale-but-real source root
+# in another worktree (true drift)". List sourced from pip 21.x-26.x
+# `pip._internal.utils.temp_dir.TempDirectory` kinds (`req-build`,
+# `build`, `install`).
+_PIP_TRANSIENT_BUILD_PREFIXES = (
+    "/tmp/pip-req-build-",
+    "/tmp/pip-build-",
+    "/tmp/pip-install-",
+)
+
 
 def _state_root() -> Path:
     """Resolve the state root the same way `swanlake.state` does.
@@ -151,6 +167,43 @@ def read_marker(*, state_root: Optional[Path] = None) -> Optional[dict[str, str]
     return out
 
 
+def _is_transient_build_path(source_path: str) -> bool:
+    """Return True when `source_path` looks like a pip transient build dir.
+
+    Two signals count as transient (either is sufficient):
+
+      1. The string starts with one of the documented pip prefixes
+         (`/tmp/pip-req-build-`, `/tmp/pip-build-`, `/tmp/pip-install-`).
+         This catches the common case even after the dir has been
+         garbage-collected (the path string is still recognisable).
+      2. The path no longer exists on disk. A stale tarball-install
+         marker satisfies this once pip wipes the build dir, regardless
+         of prefix shape; it is the single most reliable signal that
+         the marker can never legitimately match a runtime source.
+
+    The check is a pure function of the marker string + filesystem
+    state — never raises, never imports anything heavy. Callers
+    (currently `check_drift`) treat a transient-shaped marker the same
+    as a missing marker AND opportunistically rewrite it to point at
+    the runtime source on first CLI invocation.
+    """
+    if not source_path:
+        return False
+    if any(source_path.startswith(prefix) for prefix in _PIP_TRANSIENT_BUILD_PREFIXES):
+        return True
+    try:
+        if not Path(source_path).exists():
+            return True
+    except OSError:
+        # Filesystem error during stat — treat as "can't confirm it
+        # exists, so don't fire drift on it". Conservative; the worst
+        # case is we self-heal a marker that pointed at a transiently
+        # unreachable network mount, which is a benign no-op the next
+        # time the operator reruns the CLI from the right place.
+        return True
+    return False
+
+
 def _runtime_source_dir() -> Path:
     """Resolve the directory of the currently-imported `swanlake` package.
 
@@ -202,6 +255,29 @@ def check_drift(*, state_root: Optional[Path] = None) -> dict[str, Any]:
             "status": "cross-interpreter",
             "runtime_path": str(runtime),
             "marker_path": marker_source,
+            "marker_python": marker_python,
+            "runtime_python": sys.executable,
+        }
+    # Tarball/sdist installs run the cmdclass hook from a transient
+    # `/tmp/pip-req-build-<random>/` dir that pip deletes the moment
+    # the install finishes. The marker captured that dir; the runtime
+    # is wherever pip put the wheel (site-packages). Without this branch
+    # every subsequent CLI invocation fires a false-positive drift
+    # warning. Treat the transient marker as "first-run, marker not yet
+    # established" and opportunistically rewrite it to point at the
+    # runtime location so subsequent calls take the fast `ok` path.
+    if _is_transient_build_path(marker_source):
+        try:
+            write_marker(runtime, state_root=state_root)
+        except Exception:  # noqa: BLE001 — never crash CLI on warning path
+            # write_marker already swallows OSError; this catch covers
+            # anything more exotic. The check still degrades to
+            # "no-marker" (silent) regardless.
+            pass
+        return {
+            "status": "no-marker",
+            "runtime_path": str(runtime),
+            "marker_path": None,
             "marker_python": marker_python,
             "runtime_python": sys.executable,
         }

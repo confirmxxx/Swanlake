@@ -94,6 +94,12 @@ def compute_report(
     """
     now = datetime.now(timezone.utc)
     raw = _read_state(state_path)
+    # Default acks_state_root to state_path.parent so test isolation works.
+    # A custom state_path implies a custom state root for the whole reconciler
+    # including acks; without this, tests passing a tmp state_path silently
+    # read the operator's real ~/.swanlake/reconciler-acks.jsonl.
+    if acks_state_root is None:
+        acks_state_root = state_path.parent
     ack_map = _acks.latest_acks(state_root=acks_state_root)
     surfaces: dict[str, dict] = {}
     for s in SURFACES:
