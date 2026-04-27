@@ -50,7 +50,7 @@ Supporting documentation:
 - `swanlake doctor` 9th probe checks `SWANLAKE_NOTION_TOKEN` is set if any `notion-*` surface is in coverage.
 - v0.2.2 fixes folded in: `__version__` accuracy, `swanlake sync --dry-run`, `swanlake bench` install-path resolution.
 
-All v0.2.x entry points and subcommands remain unchanged. v0.1 entry points keep working with stderr-only deprecation hints — see [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md).
+All v0.2.x entry points and subcommands remain unchanged. v0.1 entry points keep working with stderr-only deprecation hints.
 
 ## Where Swanlake fits in the agent immune system
 
@@ -196,10 +196,6 @@ pip install --break-system-packages https://github.com/confirmxxx/Swanlake/archi
 
 Three commands from zero to wired.
 
-### Migrating from v0.1
-
-v0.1 entry points keep working in v0.3 with stderr-only deprecation hints, so cron jobs and pipes that consume stdout are unaffected. Full translation table in [`docs/migrating-from-v0.1.md`](./docs/migrating-from-v0.1.md). The original v0.3 removal target slipped — v0.1 entry points still ship, but treat them as transitional and migrate at your convenience.
-
 ### Manual install / customization (fallback)
 
 Operators who don't want to install the CLI can still drive each primitive directly:
@@ -296,5 +292,5 @@ Reference implementations are straightforward but have not accumulated productio
 Last reviewed against the shipped CLI surface and behavior on **2026-04-26** for v0.3.0. Docs touched in that pass:
 
 - `README.md`, `THREAT-MODEL.md`, `NON-GOALS.md`, `DEPENDENCIES.md`, `CONTRIBUTING.md`
-- `docs/migrating-from-v0.1.md`, `docs/v0.2-unified-cli-spec.md`, `docs/v0.3-beacon-deploy-spec.md`, `docs/swanlake-no-beacon.md`, `docs/how-this-fits-above-native-claude-code.md`, `docs/adversarial-research-pattern.md`, `docs/reflex-purity-pattern.md`
+- `docs/v0.2-unified-cli-spec.md`, `docs/v0.3-beacon-deploy-spec.md`, `docs/swanlake-no-beacon.md`, `docs/how-this-fits-above-native-claude-code.md`, `docs/adversarial-research-pattern.md`, `docs/reflex-purity-pattern.md`
 - `defense-beacon/README.md`, `trust-zones/README.md`, `reflex-purity/README.md`, `reconciler/README.md`, `experiments/white-cells/README.md`, `tools/README.md`, `defense-beacon/examples/synthetic-saas/README.md`
