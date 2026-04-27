@@ -210,6 +210,77 @@ swanlake adapt cc --enable-session-nudge     # opt in to per-session unprotected
 
 `scan` is read-only; never installs anything. The SessionStart nudge is advisory only — operator decides per project.
 
+### Auto-wiring (set-and-forget)
+
+Three optional wires push the framework toward "exists, doing its work, you forget about it." All advisory or local-only; none auto-modify operator surfaces.
+
+```bash
+# 1. SessionStart nudge — every CC session, one stderr line if the current
+#    project lacks Swanlake. Silent otherwise.
+swanlake adapt cc --enable-session-nudge
+
+# 2. Daily bench --quick via systemd user timer — keeps the bench freshness
+#    dim green; logs to ~/.swanlake/bench-daily.log.
+cat > ~/.config/systemd/user/swanlake-bench-daily.service <<'EOF'
+[Unit]
+Description=Swanlake daily bench --quick
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/swanlake bench --quick
+StandardOutput=append:%h/.swanlake/bench-daily.log
+StandardError=append:%h/.swanlake/bench-daily.log
+EOF
+
+cat > ~/.config/systemd/user/swanlake-bench-daily.timer <<'EOF'
+[Unit]
+Description=Run swanlake bench --quick daily
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+RandomizedDelaySec=900
+Persistent=true
+Unit=swanlake-bench-daily.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# 3. Weekly reconciler ack — fires after the security-watchdog Routine cron
+#    so the local reconciler dim clears automatically.
+cat > ~/.config/systemd/user/swanlake-reconciler-ack-weekly.service <<'EOF'
+[Unit]
+Description=Swanlake weekly reconciler-ack notion
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/swanlake reconciler ack notion --note "weekly auto-ack"
+StandardOutput=append:%h/.swanlake/reconciler-ack-weekly.log
+StandardError=append:%h/.swanlake/reconciler-ack-weekly.log
+EOF
+
+cat > ~/.config/systemd/user/swanlake-reconciler-ack-weekly.timer <<'EOF'
+[Unit]
+Description=Weekly reconciler ack (post security-watchdog Routine)
+
+[Timer]
+OnCalendar=Sun *-*-* 11:00:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+Unit=swanlake-reconciler-ack-weekly.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable --now swanlake-bench-daily.timer swanlake-reconciler-ack-weekly.timer
+```
+
+After this, the only manual ops left are `swanlake adapt cma --project <X>` once per real project (deliberately operator-confirmed because it modifies project files) and glancing at the status-line shield when curious.
+
 ### Manual install / customization (fallback)
 
 Operators who don't want to install the CLI can still drive each primitive directly:
