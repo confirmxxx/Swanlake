@@ -278,13 +278,17 @@ Single stat + at-most-three small file reads per call. Typical wall-clock < 10ms
 
 Each per-dir counter reports **real detections, not hook-fire volume**. A clean day produces zero flags even when the underlying hook fired hundreds of times — for example, `content-safety` inspects every `WebFetch`, so a normal session emits dozens of clean-fire log lines that are intentionally not surfaced.
 
-Per-dir hit predicates:
+Per-dir hit predicates (all three additionally require an *interactive session* — see below):
 
 | Dir | Schema field that signals a real hit |
 |---|---|
-| `~/.claude/canary-hits` | non-empty `hits: [...]` array |
+| `~/.claude/canary-hits` | non-empty `hits: [...]` array, `self_edit_noise` not set |
 | `~/.claude/exfil-alerts` | `severity in {"block", "warn"}` |
 | `~/.claude/content-safety` | `block: true` OR `score > 0` OR non-empty `findings` |
+
+**Interactive-session filter.** Records where `session_id` is *present-but-empty* are excluded from the counters. This is the bench-harness signature: PyRIT/Garak/AB-bench runs invoke the detection hooks against synthetic hostile fixtures by design and would otherwise flood the bar with detections that aren't real-world drift. The Claude Code hook environment populates `session_id` with a non-empty UUID in current versions, so genuine interactive hits keep counting. Records that omit the field entirely (legacy producers, external pipelines) keep their prior counted behavior — no log rewrite required.
+
+The detection itself is unchanged: bench rows are still written to disk, still available for forensics, still re-runnable by the bench harness. The filter only affects what the *counter* surfaces on the bar.
 
 Set `SWANLAKE_STATUS_VERBOSITY=full` to render `label:hits/fires` and see both numbers — useful when you want to confirm the hook is actually firing.
 
@@ -294,6 +298,101 @@ Set `SWANLAKE_STATUS_VERBOSITY=full` to render `label:hits/fires` and see both n
 - Does not aggregate by severity within the "real hit" set. An `exfil:1` from a false-positive `warn` and an `exfil:1` from a real `block` look identical. Triage via `~/.claude/exfil-alerts/` or the `sec-dash` command that reads the same logs.
 - Does not call out to the network; strictly local. Remote posture (Notion Security Posture page freshness) is reflected via the `SWANLAKE_LAST_RUN` file, which the watchdog routine updates on successful writes.
 
+## `loop-closure-metric.py`
+
+Tracks whether your defenses *fire-and-forget* or *fire-and-learn*. Powers the `closure` row of `swanlake status` and the `closure:N%` flag on the status bar.
+
+### What it measures
+
+Two questions look similar but are very different:
+
+- **Q1.** Did the defense layer fire when something hostile showed up? Already answered by `status-segment.py` — `canary:N`, `exfil:N`, `inject:N`.
+- **Q2.** When the defense fired, did the operator close the loop with a durable hardening artifact (new hook rule, new deny entry, new test fixture, conventional commit)?
+
+Q2 is the only one that distinguishes a defense that *works* from a defense that *fires-and-forgets*. The metric tracks it as a 7-day rolling ratio:
+
+```
+ratio = artifacts_produced / max(events_caught, 1)
+```
+
+| Ratio | Meaning |
+|---|---|
+| `≥ 1.0` | Every event spawned (on average) at least one hardening artifact |
+| `0.30 – 1.0` | Healthy follow-through but some events decay un-actioned |
+| `< 0.30` | Alerts piling up without follow-up — the defense is becoming theater. The status-bar flag fires. |
+
+### Inputs
+
+**Events caught** (predicates identical to `status-segment.py`, including the bench-harness session-id filter):
+
+| Source | Real-hit condition |
+|---|---|
+| `~/.claude/canary-hits/<date>.jsonl` | non-empty `hits` AND not `self_edit_noise` AND interactive session |
+| `~/.claude/content-safety/<date>.jsonl` | `block: true` OR `score > 0` OR non-empty `findings` AND interactive session |
+| `~/.claude/exfil-alerts/<date>.jsonl` | `severity in {block, warn}` AND interactive session |
+
+**Artifacts produced** (counted across the same UTC day):
+
+| Source | Counted as |
+|---|---|
+| Conventional-commit subjects in configured repos | one artifact per matching commit (`fix\|feat\|chore\|test\|docs\|refactor\|perf\|build\|ci\|style`) |
+| New deny-list entries in `~/.claude/settings.json` | one artifact per added entry, diffed against the previous day's snapshot |
+| New files under `~/.claude/hooks/` | one artifact per file with mtime in the day window |
+
+The ratio is conservative: removed deny entries don't subtract credit (cleanup is different work), and merge commits are excluded so a release-merge doesn't inflate today.
+
+### Modes
+
+```bash
+# 1. Compute today's rollup, write to ~/.claude/loop-closure/<date>.json (default)
+python3 tools/loop-closure-metric.py
+python3 tools/loop-closure-metric.py --rollup
+
+# 2. Aggregate the last N days from per-day rollups (computes missing days on the fly)
+python3 tools/loop-closure-metric.py --report --days 7
+
+# 3. Status-bar flag — emits "closure:NN%" if 7-day ratio is below threshold (default 30%)
+#    AND the window has at least 3 events. Always exits 0; status lines must not break.
+python3 tools/loop-closure-metric.py --status-flag
+```
+
+### Configuration (all env vars)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SWANLAKE_CANARY_HITS` | `~/.claude/canary-hits` | Canary-match log directory (shared with `status-segment.py`) |
+| `SWANLAKE_CONTENT_HITS` | `~/.claude/content-safety` | Content-safety-check log directory |
+| `SWANLAKE_EXFIL_HITS` | `~/.claude/exfil-alerts` | Exfil-monitor log directory |
+| `SWANLAKE_ROLLUP_DIR` | `~/.claude/loop-closure` | Where per-day rollups are written |
+| `SWANLAKE_HOOKS_DIR` | `~/.claude/hooks` | Watched for new defensive hook files |
+| `SWANLAKE_SETTINGS_FILE` | `~/.claude/settings.json` | Source of truth for the deny-list entry count |
+| `SWANLAKE_HARDENING_REPOS` | `~/projects/Swanlake,~/projects/DEFENSE-BEACON` | Comma-separated absolute paths of git repos scanned for conventional-commit artifacts |
+| `SWANLAKE_CLOSURE_THRESHOLD` | `0.30` | Ratio threshold below which `--status-flag` fires |
+
+### What it does NOT measure
+
+A high closure ratio is not a security claim. The metric counts pattern-match events against actions taken, not attacks against successful blocks. Specifically it does not tell you:
+
+- whether any of the events were real attacks (most are pattern hits on prose — security articles, the operating-rules document, log dumps that quote prior hits)
+- whether the artifacts you produced were *related* to the events caught (a conventional commit unrelated to defense still counts as an artifact — by design, since the operator may be hardening orthogonally)
+- whether bench coverage is sufficient (the bench dimension answers that)
+
+Use the closure ratio to detect *neglect*, not to certify *defense health*. If you stop responding to fires, the ratio shows it before the alert fatigue compounds.
+
+### Pairs with
+
+- `status-segment.py` — same predicates, same session-id filter, so the bar and the metric tell the same story
+- `swanlake status` — folds today's rollup into the `closure` row and the overall verdict
+- `swanlake bench --quick` — keeps the events-caught denominator honest by re-firing the detectors on synthetic fixtures whose `session_id=""` makes them invisible to this metric
+
+### Dependencies
+
+Python 3.10+ stdlib only. No `pip install` required.
+
+### Tests
+
+`python3 tools/tests/loop_closure_metric_test.py` runs the full unittest suite (33 tests as of v0.4.3): predicate parity with `status-segment.py`, the empty-`session_id` filter, hardening-artifact counters, rollup composition, window aggregation, and `--status-flag` emission.
+
 ## Future additions here
 
-Candidate additions for this directory (PRs welcome): a `canary-triage.py` that lists + clears today's benign canary hits; a `posture-diff.py` that diffs two `last_verified` timestamps to summarize what the watchdog added; a Starship preset with glyph/color mapping.
+Candidate additions for this directory (PRs welcome): a `canary-triage.py` that lists + clears today's benign canary hits; a `posture-diff.py` that diffs two `last_verified` timestamps to summarize what the watchdog added; a Starship preset with glyph/color mapping; a `loop-closure-metric.py --backfill <date>` flag to recompute a stale rollup without requiring a today-rollup invocation.
