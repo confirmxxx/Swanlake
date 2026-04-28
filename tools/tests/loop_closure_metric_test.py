@@ -87,6 +87,39 @@ class PredicateParityTest(unittest.TestCase):
     def test_exfil_info_not_counted(self):
         self.assertFalse(lcm._exfil_hit({"severity": "info"}))
 
+    # --- session_id filter: bench/CI harnesses write empty session_id and
+    # must not inflate the events-caught denominator. Records that omit the
+    # field entirely (legacy/external producers) keep their prior behavior.
+
+    def test_empty_session_id_excludes_content_safety(self):
+        rec = {"block": True, "score": 0, "findings": [], "session_id": ""}
+        self.assertFalse(lcm._content_safety_hit(rec))
+
+    def test_empty_session_id_excludes_canary(self):
+        rec = {"hits": [{"token": "x", "locations": ["x"]}],
+               "session_id": ""}
+        self.assertFalse(lcm._canary_hit(rec))
+
+    def test_empty_session_id_excludes_exfil(self):
+        self.assertFalse(lcm._exfil_hit({"severity": "block",
+                                         "session_id": ""}))
+
+    def test_present_session_id_keeps_record(self):
+        sid = "b3e7dd3d-8405-4818-b505-f6f2ecb5eb2b"
+        self.assertTrue(lcm._content_safety_hit(
+            {"block": True, "session_id": sid}))
+        self.assertTrue(lcm._canary_hit(
+            {"hits": [{"t": 1}], "session_id": sid}))
+        self.assertTrue(lcm._exfil_hit(
+            {"severity": "warn", "session_id": sid}))
+
+    def test_missing_session_id_field_keeps_legacy_behavior(self):
+        # Records that never carried the field stay counted, so existing
+        # producers and old log lines continue to register.
+        self.assertTrue(lcm._content_safety_hit({"block": True}))
+        self.assertTrue(lcm._canary_hit({"hits": [{"t": 1}]}))
+        self.assertTrue(lcm._exfil_hit({"severity": "block"}))
+
 
 class JsonlIterTest(unittest.TestCase):
     def test_missing_file_returns_empty(self):
@@ -345,6 +378,37 @@ class RollupTest(unittest.TestCase):
             self.assertEqual(r["events_caught"], 2)
             self.assertEqual(r["artifacts_produced"], 2)
             self.assertEqual(r["ratio"], 1.0)
+
+    def test_bench_harness_records_excluded_from_events(self):
+        # Empty session_id is the bench-harness signature — running
+        # PYRIT/GARAK/AB benches against the detectors fires every line by
+        # design. Those rows must not bleed into events_caught.
+        with tempfile.TemporaryDirectory() as d:
+            canary, content, exfil, rollup, hooks, repo = self._scratch(Path(d))
+            settings = Path(d) / "settings.json"
+            settings.write_text(json.dumps({"permissions": {"deny": []}}))
+            real_sid = "b3e7dd3d-8405-4818-b505-f6f2ecb5eb2b"
+            _today_jsonl(content).write_text("\n".join([
+                # 50 bench rows, then 2 real interactive hits.
+                *[json.dumps({"block": True, "session_id": ""})
+                  for _ in range(50)],
+                json.dumps({"block": True, "session_id": real_sid}),
+                json.dumps({"score": 1.5, "findings": [{"x": 1}],
+                            "session_id": real_sid}),
+            ]) + "\n")
+            mod = _reload_with_env({
+                "SWANLAKE_CANARY_HITS": canary,
+                "SWANLAKE_CONTENT_HITS": content,
+                "SWANLAKE_EXFIL_HITS": exfil,
+                "SWANLAKE_ROLLUP_DIR": rollup,
+                "SWANLAKE_HOOKS_DIR": hooks,
+                "SWANLAKE_SETTINGS_FILE": settings,
+                "SWANLAKE_HARDENING_REPOS": str(repo),
+            })
+            today = datetime.now(timezone.utc).date()
+            r = mod.compute_rollup(today)
+            self.assertEqual(r["events_breakdown"]["content_safety"], 2)
+            self.assertEqual(r["events_caught"], 2)
 
     def test_self_edit_noise_does_not_inflate_events(self):
         with tempfile.TemporaryDirectory() as d:
