@@ -114,7 +114,28 @@ CONVENTIONAL_COMMIT_RE = re.compile(
 # rollup may run in environments where the two scripts diverge in ownership.
 # If they do diverge, the test suite catches it.
 
+def _is_interactive_session(rec: dict) -> bool:
+    """Return False if the record is from a non-interactive context (bench
+    harness, CI fixture, direct shell invocation). The Claude Code hook
+    environment always populates session_id with a non-empty UUID; bench
+    runners and ad-hoc test invocations write the field with an empty
+    string. Records lacking the field entirely (legacy rows or external
+    producers) are treated as interactive — we only filter when the field
+    is present and explicitly empty, which is the bench-harness signature.
+
+    Rationale: bench fixtures fire detectors *by design* on synthetic
+    hostile content. Counting them as "events caught" inflates the
+    denominator of the closure ratio and turns the metric into a measure
+    of bench activity rather than real-world drift response."""
+    sid = rec.get("session_id")
+    if sid is None:
+        return True
+    return bool(sid)
+
+
 def _content_safety_hit(rec: dict) -> bool:
+    if not _is_interactive_session(rec):
+        return False
     if rec.get("block") is True:
         return True
     score = rec.get("score")
@@ -132,10 +153,14 @@ def _canary_hit(rec: dict) -> bool:
         return False
     if rec.get("self_edit_noise") is True:
         return False
+    if not _is_interactive_session(rec):
+        return False
     return True
 
 
 def _exfil_hit(rec: dict) -> bool:
+    if not _is_interactive_session(rec):
+        return False
     return rec.get("severity") in ("block", "warn")
 
 
