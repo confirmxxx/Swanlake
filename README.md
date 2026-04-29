@@ -1,4 +1,4 @@
-# Swanlake
+# Swanlake//Лебедь vol I
 
 **Swanlake** is a defense-in-depth security framework for AI agents — whether those agents run inside Claude Code on your developer machine or as autonomous agents inside production applications. Swanlake is the **Subroutine Layer**: a set of small, composable primitives that sit beneath your agent. You turn on the primitives that address your specific threats; each one addresses a specific attack class. None promise perfect defense.
 
